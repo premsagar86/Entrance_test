@@ -18,7 +18,6 @@ export function AuthExperience({ initial }: { initial: Mode }) {
   const [mode, setMode] = useState<Mode>(initial); // drives the blade
   const [paneMode, setPaneMode] = useState<Mode>(initial); // drives which form is live
   const [moving, setMoving] = useState(false);
-  const [adminStep, setAdminStep] = useState<"details" | "otp">("details");
   const timers = useRef<number[]>([]);
   const studentPane = useRef<HTMLElement>(null);
   const adminPane = useRef<HTMLElement>(null);
@@ -60,8 +59,6 @@ export function AuthExperience({ initial }: { initial: Mode }) {
     [mode, moving],
   );
 
-  const otp = mode === "admin" && adminStep === "otp";
-
   return (
     <div className="auth-stage flex min-h-screen flex-col items-center justify-center px-4 py-6">
       <div className="mb-5 text-center">
@@ -73,7 +70,7 @@ export function AuthExperience({ initial }: { initial: Mode }) {
 
       <div className="w-full max-w-4xl">
         <Announcements />
-        <div className="auth" data-mode={mode} data-step={adminStep} data-moving={moving}>
+        <div className="auth" data-mode={mode} data-moving={moving}>
           {/* The blade (desktop only) */}
           <div className="auth__band" aria-hidden={paneMode === mode ? undefined : true}>
             <span className="auth__edge auth__edge--lead" />
@@ -90,11 +87,7 @@ export function AuthExperience({ initial }: { initial: Mode }) {
                   />
                 </div>
                 <div className={`auth__copy auth__copy--admin ${mode === "admin" ? "is-on" : ""}`}>
-                  {otp ? (
-                    <BladeCopy kicker="Almost there" line="Check your" accent="inbox." text="We sent a one-time code to your email. It expires in 5 minutes." />
-                  ) : (
-                    <BladeCopy kicker="Admin console" line="Run the" accent="exam." text="Upload questions, publish tests and review every result in one place." />
-                  )}
+                  <BladeCopy kicker="Admin console" line="Run the" accent="exam." text="Upload questions, publish tests and review every result in one place." />
                 </div>
               </div>
             </div>
@@ -124,11 +117,8 @@ export function AuthExperience({ initial }: { initial: Mode }) {
 
           {/* Admin pane */}
           <section ref={adminPane} className={`auth__pane auth__pane--admin ${paneMode === "admin" ? "is-on" : ""}`} aria-label="Admin sign in">
-            <Heading
-              title={adminStep === "details" ? "Admin sign in" : "Check your email"}
-              subtitle={adminStep === "details" ? "Enter your details and we will email you a one-time code." : "Enter the 6-digit code to finish signing in."}
-            />
-            <AdminLoginForm active={paneMode === "admin"} onStepChange={setAdminStep} />
+            <Heading title="Admin sign in" subtitle="Enter your email and phone number." />
+            <AdminLoginForm active={paneMode === "admin"} />
             <SwitchLink onClick={() => go("student")} lead="Are you a student?" action="Student sign in" />
           </section>
         </div>

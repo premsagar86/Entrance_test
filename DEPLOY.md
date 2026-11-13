@@ -12,8 +12,7 @@ Two supported ways to run this app:
 ```
 Browser --> Vercel (Next.js serverless + daily cron) --> Neon Postgres (pooled connection)
                        |--> Cloudflare R2 (uploaded documents)
-                       |--> Brevo API (admin OTP email)
-GitHub Actions: CI -> migrate Neon -> vercel deploy -> health check ; weekly encrypted DB backup
+GitHub push -> Vercel auto-deploy (GitHub Actions only run CI checks)
 ```
 
 ## A2. Create the free accounts
@@ -23,7 +22,7 @@ GitHub Actions: CI -> migrate Neon -> vercel deploy -> health check ; weekly enc
    - **Direct** (no `-pooler`) -> `DIRECT_URL` (used only for migrations).
 2. **Cloudflare R2**: create a private bucket. Create an **R2 API token** (Object Read & Write, scoped to the bucket). Note the account id, access key id, secret and bucket name.
 3. **Cloudflare Turnstile**: add a widget for your Vercel domain; copy the site key and secret.
-4. **Brevo** (email for admin OTPs): create a free account (about 300 emails/day). Add and verify a sender (Senders, Domains & Dedicated IPs -> Senders; a verified domain with SPF/DKIM gives the best deliverability). Then *SMTP & API -> API Keys -> Generate a new API key* (the **API** key, not an SMTP key). Set `BREVO_API_KEY=<key>` and `MAIL_FROM="Aptitude Test <your-verified-sender>"`. `MAIL_FROM` must be a verified Brevo sender or mail is rejected.
+4. **Brevo (optional, not needed for login)**: admin sign-in now uses email + phone number, so no email is sent. If you want email later, create a free account (about 300 emails/day). Add and verify a sender (Senders, Domains & Dedicated IPs -> Senders; a verified domain with SPF/DKIM gives the best deliverability). Then *SMTP & API -> API Keys -> Generate a new API key* (the **API** key, not an SMTP key). Set `BREVO_API_KEY=<key>` and `MAIL_FROM="Aptitude Test <your-verified-sender>"`. `MAIL_FROM` must be a verified Brevo sender or mail is rejected.
 5. **Gemini** (optional): API key from Google AI Studio.
 6. **Vercel**: *Add New -> Project*, import the GitHub repo (framework Next.js; `vercel.json` sets the install and build commands). `vercel.json` disables Vercel's own Git auto-deploys; the GitHub workflow in A5 deploys instead, after migrations.
 
@@ -34,13 +33,13 @@ GitHub Actions: CI -> migrate Neon -> vercel deploy -> health check ; weekly enc
 | `DATABASE_URL` | Neon **pooled** URL (see A2). |
 | `DIRECT_URL` | Neon **direct** URL. |
 | `SESSION_SECRET`, `DOB_PEPPER` | 32+ random chars each (`openssl rand -hex 32`). **Never change `DOB_PEPPER`** after importing students. |
-| `BREVO_API_KEY`, `MAIL_FROM` | From A2.4. |
+| `BREVO_API_KEY`, `MAIL_FROM` | Optional (not used by sign-in). |
 | `R2_ACCOUNT_ID`, `R2_ACCESS_KEY`, `R2_SECRET_KEY`, `R2_BUCKET` | From A2.2. Uploads fail on Vercel without them. |
 | `TURNSTILE_SECRET`, `NEXT_PUBLIC_TURNSTILE_SITE_KEY` | From A2.3. |
 | `GEMINI_API_KEY` | Optional. |
 | `CRON_SECRET` | Random 32+ chars. Vercel Cron sends it to `/api/cron/cleanup`. |
 
-Do not set `DEV_SKIP_ADMIN_OTP`. `SEED_ADMIN_EMAIL` / `SEED_ADMIN_PHONE` are only needed when you run the seed (A4).
+`SEED_ADMIN_EMAIL` / `SEED_ADMIN_PHONE` are only needed when you run the seed (A4).
 
 ## A4. First release (once, from your computer)
 
@@ -52,30 +51,36 @@ npx prisma migrate deploy
 npx tsx prisma/seed.ts          # creates the first admin
 ```
 
-Then deploy: push to `main` (CI, then the deploy workflow in A5) or run the *Deploy* workflow manually. Check `https://<your-app>.vercel.app/api/health` returns `{"status":"ok"}`, then run the smoke test (V6 below).
+Then deploy: push to `main` (Vercel deploys automatically, see A5). Check `https://<your-app>.vercel.app/api/health` returns `{"status":"ok"}`, then run the smoke test (V6 below).
 
-## A5. CI/CD with GitHub Actions
+## A5. Deploys (automatic) and CI
 
-Pipeline: push/PR -> **CI** (`ci.yml`: lint, typecheck, tests, build, migrations against a clean Postgres) -> on `main` **Deploy** (`deploy.yml`): `prisma migrate deploy` on Neon -> `vercel build` + `vercel deploy --prod` -> health check. **DB backup** (`backup.yml`): weekly encrypted `pg_dump`.
+**Deploys:** Vercel's GitHub integration deploys the app. Every push to `main` goes to production, and every pull request gets its own preview URL. No GitHub Actions are needed for deploying, and no tokens or secrets in GitHub.
 
-One-time GitHub setup (repo Settings):
+One-time setup:
+1. Vercel -> *Add New -> Project* -> import the GitHub repo (A2.6). Production branch: `main`.
+2. Add the environment variables from A3, then *Deployments -> Redeploy* once.
+3. Check `https://<your-app>.vercel.app/api/health` returns `{"status":"ok"}`.
 
-1. **Secrets and variables -> Actions -> Secrets**: `NEON_DIRECT_URL`, `VERCEL_TOKEN` (vercel.com/account/tokens), `VERCEL_ORG_ID` and `VERCEL_PROJECT_ID` (run `npx vercel link` locally, then read `.vercel/project.json`; do not commit it), `BACKUP_PASSPHRASE` (long random string, keep it in a password manager).
-2. **Variables**: `APP_URL` = your production URL, e.g. `https://your-app.vercel.app` (no trailing slash).
-3. **Environments**: create `production` (optionally require a reviewer for manual approval).
-4. **Branches**: protect `main` and require the `verify` check.
+**Checks (optional but recommended):** `.github/workflows/ci.yml` runs lint, typecheck, tests, the build and the migrations against a clean Postgres on every push and pull request. In GitHub *Settings -> Branches*, protect `main` and require the `verify` check, so broken code is caught in the pull request. Vercel itself still deploys on push.
 
-Notes:
-- Migrations run **before** the new code goes live, so keep them backward-compatible (add columns/tables first, remove later). Rollback never undoes migrations.
-- Rollback: Vercel -> Deployments -> pick the previous good one -> *Promote to Production* (instant). If a migration was harmful, use Neon point-in-time restore (the free plan keeps a short history) or the weekly backup.
-- Backups contain student data. `backup.yml` stores an encrypted artifact for 30 days; use it only in a **private** repo. Restore: `gpg -d db-DATE.sql.gz.gpg | gunzip | psql "<direct url>"`.
-- Daily cleanup (stale attempts, expired sessions/OTPs) runs from Vercel Cron (`vercel.json`, 03:30 UTC) calling `/api/cron/cleanup`.
+**Database migrations are manual.** When a change adds a migration (a new folder in `prisma/migrations`), run it once from your computer before or right after merging:
+```bash
+npx prisma migrate deploy
+```
+It uses `DIRECT_URL` from your `.env`. Keep migrations backward-compatible (add columns/tables first, remove later), because the old and new code run side by side during a deploy.
+
+**Rollback:** Vercel -> Deployments -> pick the previous good deployment -> *Promote to Production* (instant). It does not undo migrations.
+
+**Backups:** Neon keeps a short point-in-time restore window on the free plan. For extra safety, take a manual dump before risky changes: `pg_dump "<direct url>" | gzip > backup.sql.gz`. Keep it private; it contains student data.
+
+**Daily cleanup** (stale attempts, expired sessions) runs from Vercel Cron (`vercel.json`, 03:30 UTC) calling `/api/cron/cleanup`; it needs `CRON_SECRET` in Vercel.
 
 ## A6. Free-tier limits to know
 
 - **Vercel Hobby**: non-commercial only; uploads are limited to **4 MB** per file (request body cap, enforced in the app); function time limits apply to document parsing, so very large scanned PDFs may time out (prefer text-based files).
 - **Neon free**: compute scales to zero when idle, so the first request after a quiet period is slower. Before an exam, open `/api/health` a few minutes early. Storage and compute are limited.
-- **Brevo free plan**: about 300 emails/day; fine for admin OTPs.
+- **Brevo**: optional and unused by sign-in.
 - **Before a large exam**: load-test login and autosave on a preview deployment, take a manual backup (run the *DB backup* workflow), and do not deploy during the exam.
 
 ## A7. Troubleshooting
@@ -85,16 +90,14 @@ Notes:
 | Upload fails: "File storage is not configured" | `R2_*` variables missing in Vercel. |
 | Upload says file larger than 4 MB | Vercel body cap; compress or split the file. |
 | `Can't reach database` / too many connections | `DATABASE_URL` must be the **pooled** URL with `pgbouncer=true`. |
-| Admin OTP never arrives | Check `BREVO_API_KEY` / `MAIL_FROM`; run `npm run mail:test -- you@example.com` locally with the same values. `BREVO_API_KEY` must be an API key (not an SMTP key) and `MAIL_FROM` a verified Brevo sender. |
 | Turnstile widget missing | `NEXT_PUBLIC_TURNSTILE_SITE_KEY` missing in Vercel; redeploy after adding. |
-| Deploy job fails at `vercel pull` | `VERCEL_TOKEN` / `VERCEL_ORG_ID` / `VERCEL_PROJECT_ID` wrong. |
 | Cron route returns 401 | `CRON_SECRET` not set in Vercel. |
 
 ---
 
 # Part B: Self-hosted VPS (Docker Compose + Caddy)
 
-Sections below are prefixed with `V`. Mail uses the Brevo API. The GitHub Actions in this repo target Vercel; for a VPS you update with the manual flow in V7 (or build your own pipeline around the image-based `docker-compose.yml`).
+Sections below are prefixed with `V`. Mail uses the Brevo API. The Only `ci.yml` (checks) exists in `.github/workflows`; for a VPS you update with the manual flow in V7.
 
 Complete guide to deploying the Aptitude Test Platform to production with Docker Compose (recommended), plus notes for non-Docker and managed hosting.
 
@@ -128,7 +131,7 @@ Internet --443--> Caddy (auto HTTPS) --> app (Next.js standalone, :3000) --> db 
 
 | Service | Needed? | What to do |
 |---|---|---|
-| **Brevo** | Yes, for admin OTP emails | Brevo API. Set `BREVO_API_KEY` and `MAIL_FROM`. Without them, OTPs print to the server logs only. |
+| **Brevo** | No | Admin sign-in uses email + phone number, so no email is sent. Optional for future use. |
 | **Cloudflare Turnstile** | Strongly recommended | Dashboard -> Turnstile -> add your domain. Copy the site key and secret key. |
 | **Google Gemini** | Optional | Only a fallback for parsing scanned PDFs/images. Create a key in Google AI Studio. |
 
@@ -154,13 +157,12 @@ Edit `.env`:
 | `DOB_PEPPER` | Yes | 32+ random chars used to hash student DOBs. **Never change it after importing students**, or no student can log in. |
 | `DOMAIN` | Yes | Your domain, e.g. `tests.example.com`. Caddy uses it to obtain the certificate. |
 | `SEED_ADMIN_EMAIL` | Yes | First admin's email. |
-| `SEED_ADMIN_PHONE` | Yes | First admin's phone, 8-15 digits (e.g. `919876543210`). Used together with the emailed OTP. |
+| `SEED_ADMIN_PHONE` | Yes | First admin's phone, 8-15 digits (e.g. `919876543210`). It is the admin's sign-in password (with the email). Use a long, unusual number, not a real phone. |
 | `BREVO_API_KEY` | Yes (prod) | Brevo API key. |
 | `MAIL_FROM` | Yes (prod) | Sender verified in Brevo. |
 | `TURNSTILE_SECRET` | Recommended | Server-side Turnstile key. |
 | `TURNSTILE_SITE_KEY`, `NEXT_PUBLIC_TURNSTILE_SITE_KEY` | Recommended | Site key (set both to the same value). The public one is baked in **at build time**, so rebuild after changing it. |
 | `GEMINI_API_KEY` | Optional | Scanned-document fallback. |
-| `DEV_SKIP_ADMIN_OTP` | No | Keep `false` (ignored in production anyway). |
 | `STORAGE_DIR` | No | Set by compose to `/app/storage` (the `uploads` volume). |
 | `R2_*` | No | Optional on a VPS: if all four are set, uploads go to R2 instead of the volume. |
 
@@ -215,7 +217,7 @@ curl -s https://<DOMAIN>/api/health
 
 ## V7a. CI/CD on a VPS
 
-The workflows in this repo (`ci.yml`, `deploy.yml`, `backup.yml`) target Vercel + Neon. `ci.yml` works for any setup. On a VPS, update with the manual flow in V7, or write your own deploy job (SSH, `docker compose build`, migrate, `up -d`, health check). `docker-compose.yml` also accepts prebuilt images via `IMAGE` and `TAG` if you push them to a registry. `scripts/server-setup.sh` prepares a fresh Ubuntu VPS (Docker, firewall, fail2ban, `deploy` user, swap).
+The only workflow in this repo is `ci.yml` (checks), which works for any setup. On a VPS, update with the manual flow in V7, or write your own deploy job (SSH, `docker compose build`, migrate, `up -d`, health check). `docker-compose.yml` also accepts prebuilt images via `IMAGE` and `TAG` if you push them to a registry. `scripts/server-setup.sh` prepares a fresh Ubuntu VPS (Docker, firewall, fail2ban, `deploy` user, swap).
 
 ## V8. Backups and restore
 
@@ -255,10 +257,10 @@ docker compose exec -T app tar -C /app -xzf - < /var/backups/aptitude/uploads-YY
   sudo ufw default deny incoming && sudo ufw allow 22,80,443/tcp && sudo ufw enable
   ```
 - SSH: key-only login, no password or root login.
-- Keep `DEV_SKIP_ADMIN_OTP=false`; use a real mail provider and Turnstile.
+- The admin phone number is the password: pick a long, unique value, keep Turnstile on, and do not reuse a real phone number.
 - Keep `.env` out of git, mode `600`. Rotate `SESSION_SECRET` and API keys if leaked (never `DOB_PEPPER`).
 - Enable unattended security updates: `sudo apt install unattended-upgrades`.
-- The app already sets HSTS, a nonce-based CSP and frame/referrer/permissions headers, and rate-limits login and OTP.
+- The app already sets HSTS, a nonce-based CSP and frame/referrer/permissions headers, and rate-limits login.
 - CI (`.github/workflows/ci.yml`) runs lint, typecheck, tests, build and `npm audit`; accept Dependabot updates.
 - Before a large live exam, load-test login + autosave (e.g. k6) at your expected concurrency, and scan a staging copy (e.g. OWASP ZAP). These are not automated in this repo.
 
@@ -277,7 +279,6 @@ docker compose exec -T app tar -C /app -xzf - < /var/backups/aptitude/uploads-YY
 | Caddy can't get a certificate | DNS `A` record not pointing at the server, or ports 80/443 blocked. See `docker compose logs caddy`. |
 | `set POSTGRES_PASSWORD` error | `POSTGRES_PASSWORD` missing in `.env`. |
 | App restarts; logs show Zod/env errors | `SESSION_SECRET` / `DOB_PEPPER` missing or shorter than 32 chars. |
-| Admin OTP never arrives | `BREVO_API_KEY` or `MAIL_FROM` missing/wrong (run `npm run mail:test`). The app falls back to printing the code in `docker compose logs app`. |
 | Students can't log in after a change | `DOB_PEPPER` was changed. Restore the original value. |
 | Turnstile widget missing | `NEXT_PUBLIC_TURNSTILE_SITE_KEY` was set after build; run `docker compose build --no-cache app`. |
 | Uploads vanish after redeploy | Volume not mounted; `docker compose config` should show `uploads:/app/storage`. |

@@ -66,9 +66,6 @@ body {
 .auth[data-mode="admin"] {
   --sweep: -67.14%; /* blade rests on the left (Admin) */
 }
-.auth[data-mode="admin"][data-step="otp"] {
-  --rake: 8deg;
-}
 
 .auth__band {
   position: absolute;
