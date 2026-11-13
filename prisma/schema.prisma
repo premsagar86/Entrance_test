@@ -1,0 +1,249 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+enum UserType {
+  STUDENT
+  ADMIN
+}
+
+enum TestStatus {
+  DRAFT
+  PUBLISHED
+  CLOSED
+}
+
+enum DocStatus {
+  UPLOADED
+  PARSING
+  PARSED
+  FAILED
+}
+
+enum AttemptStatus {
+  IN_PROGRESS
+  SUBMITTED
+  EXPIRED
+}
+
+enum AnnType {
+  INFO
+  MAINTENANCE
+  WARNING
+  RELEASE_NOTE
+}
+
+enum Audience {
+  STUDENT
+  ADMIN
+  ALL
+}
+
+model Admin {
+  id        String    @id @default(cuid())
+  email     String    @unique
+  phone     String    @unique // E.164
+  name      String
+  createdAt DateTime  @default(now())
+  otps      OtpCode[]
+
+  @@map("admins")
+}
+
+model Student {
+  id          String           @id @default(cuid())
+  email       String           @unique
+  rollNo      String?          @unique @map("roll_no")
+  name        String
+  dobHash     String           @map("dob_hash") // HMAC(DOB, pepper)
+  batch       String?
+  createdAt   DateTime         @default(now())
+  assignments TestAssignment[]
+  attempts    Attempt[]
+
+  @@map("students")
+}
+
+model Session {
+  idHash            String    @id @map("id_hash")
+  userType          UserType  @map("user_type")
+  userId            String    @map("user_id")
+  expiresAt         DateTime  @map("expires_at")
+  absoluteExpiresAt DateTime  @map("absolute_expires_at")
+  revokedAt         DateTime? @map("revoked_at")
+  createdAt         DateTime  @default(now()) @map("created_at")
+
+  @@index([userType, userId])
+  @@map("sessions")
+}
+
+model OtpCode {
+  id        String    @id @default(cuid())
+  adminId   String    @map("admin_id")
+  admin     Admin     @relation(fields: [adminId], references: [id], onDelete: Cascade)
+  codeHash  String    @map("code_hash")
+  expiresAt DateTime  @map("expires_at")
+  attempts  Int       @default(0)
+  usedAt    DateTime? @map("used_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+
+  @@index([adminId])
+  @@map("otp_codes")
+}
+
+model RateLimit {
+  key         String    @id
+  count       Int       @default(0)
+  windowStart DateTime  @map("window_start")
+  lockedUntil DateTime? @map("locked_until")
+
+  @@map("rate_limits")
+}
+
+model Document {
+  id         String    @id @default(cuid())
+  filename   String
+  path       String
+  mime       String
+  status     DocStatus @default(UPLOADED)
+  uploadedBy String    @map("uploaded_by")
+  createdAt  DateTime  @default(now()) @map("created_at")
+  tests      Test[]
+
+  @@map("documents")
+}
+
+model Test {
+  id                String           @id @default(cuid())
+  title             String
+  documentId        String?          @map("document_id")
+  document          Document?        @relation(fields: [documentId], references: [id])
+  durationMin       Int              @map("duration_min")
+  totalMarks        Int              @default(0) @map("total_marks")
+  negativeMarking   Float            @default(0) @map("negative_marking")
+  startAt           DateTime?        @map("start_at")
+  endAt             DateTime?        @map("end_at")
+  status            TestStatus       @default(DRAFT)
+  holdResults       Boolean          @default(false) @map("hold_results")
+  showAnswers       Boolean          @default(false) @map("show_answers")
+  resultsReleasedAt DateTime?        @map("results_released_at")
+  createdAt         DateTime         @default(now()) @map("created_at")
+  questions         Question[]
+  assignments       TestAssignment[]
+  attempts          Attempt[]
+
+  @@map("tests")
+}
+
+model Question {
+  id            String   @id @default(cuid())
+  testId        String   @map("test_id")
+  test          Test     @relation(fields: [testId], references: [id], onDelete: Cascade)
+  text          String
+  options       Json
+  correctOption Int?     @map("correct_option") // null until admin sets it; blocks publish
+  marks         Int      @default(1)
+  explanation   String?
+  order         Int
+  confidence    Float?
+  answers       Answer[]
+
+  @@index([testId, order])
+  @@map("questions")
+}
+
+model TestAssignment {
+  testId    String  @map("test_id")
+  studentId String  @map("student_id")
+  test      Test    @relation(fields: [testId], references: [id], onDelete: Cascade)
+  student   Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  @@id([testId, studentId])
+  @@map("test_assignments")
+}
+
+model Attempt {
+  id          String        @id @default(cuid())
+  testId      String        @map("test_id")
+  studentId   String        @map("student_id")
+  test        Test          @relation(fields: [testId], references: [id])
+  student     Student       @relation(fields: [studentId], references: [id])
+  startedAt   DateTime      @default(now()) @map("started_at")
+  expiresAt   DateTime      @map("expires_at")
+  submittedAt DateTime?     @map("submitted_at")
+  score       Int?
+  status      AttemptStatus @default(IN_PROGRESS)
+  answers     Answer[]
+  events      AttemptEvent[]
+
+  @@unique([testId, studentId])
+  @@map("attempts")
+}
+
+model Answer {
+  attemptId      String   @map("attempt_id")
+  questionId     String   @map("question_id")
+  attempt        Attempt  @relation(fields: [attemptId], references: [id], onDelete: Cascade)
+  question       Question @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  selectedOption Int?     @map("selected_option")
+  isCorrect      Boolean? @map("is_correct")
+  answeredAt     DateTime @default(now()) @map("answered_at")
+
+  @@id([attemptId, questionId])
+  @@map("answers")
+}
+
+model Announcement {
+  id         String                  @id @default(cuid())
+  title      String
+  body       String
+  type       AnnType
+  audience   Audience                @default(ALL)
+  startsAt   DateTime?               @map("starts_at")
+  endsAt     DateTime?               @map("ends_at")
+  isActive   Boolean                 @default(true) @map("is_active")
+  createdBy  String                  @map("created_by")
+  createdAt  DateTime                @default(now()) @map("created_at")
+  dismissals AnnouncementDismissal[]
+
+  @@map("announcements")
+}
+
+model AnnouncementDismissal {
+  announcementId String       @map("announcement_id")
+  userType       UserType     @map("user_type")
+  userId         String       @map("user_id")
+  dismissedAt    DateTime     @default(now()) @map("dismissed_at")
+  announcement   Announcement @relation(fields: [announcementId], references: [id], onDelete: Cascade)
+
+  @@id([announcementId, userType, userId])
+  @@map("announcement_dismissals")
+}
+
+model AuditLog {
+  id     String   @id @default(cuid())
+  actor  String
+  action String
+  meta   Json?
+  at     DateTime @default(now())
+
+  @@index([at])
+  @@map("audit_log")
+}
+
+model AttemptEvent {
+  id        String   @id @default(cuid())
+  attemptId String   @map("attempt_id")
+  attempt   Attempt  @relation(fields: [attemptId], references: [id], onDelete: Cascade)
+  type      String // TAB_HIDDEN | TAB_VISIBLE | WINDOW_BLUR | FULLSCREEN_EXIT
+  at        DateTime @default(now())
+
+  @@index([attemptId, at])
+  @@map("attempt_events")
+}

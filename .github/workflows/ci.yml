@@ -1,0 +1,29 @@
+name: CI
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    env:
+      DATABASE_URL: postgresql://aptitude:ci@localhost:5432/aptitude
+      DIRECT_URL: postgresql://aptitude:ci@localhost:5432/aptitude
+      SESSION_SECRET: ci-session-secret-ci-session-secret-ci-session
+      DOB_PEPPER: ci-dob-pepper-ci-dob-pepper-ci-dob-pepper-xx
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci --legacy-peer-deps
+      - run: npx prisma generate
+      - run: npx prisma validate
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+      - run: npm audit --omit=dev --audit-level=high
+        continue-on-error: true

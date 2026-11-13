@@ -1,0 +1,312 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: light;
+}
+
+body {
+  font-family: var(--font-geist-sans), system-ui, -apple-system, "Segoe UI", sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+@layer components {
+  .input-base {
+    @apply h-11 w-full rounded-lg border border-slate-300 bg-surface px-3 text-sm text-slate-900 placeholder:text-slate-400
+      transition focus:border-brand-500 focus:outline-none focus:ring-4 focus:ring-brand-100 disabled:bg-slate-100;
+  }
+  .btn-primary {
+    @apply inline-flex h-11 w-full items-center justify-center gap-2 rounded-lg bg-gradient-to-r from-brand-600 to-cyan-500 px-4 text-sm font-semibold text-white
+      shadow-sm transition hover:from-brand-700 hover:to-cyan-600 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-brand-200
+      disabled:cursor-not-allowed disabled:opacity-60;
+  }
+  /* Soft page background: faint grid + blue tint, as in the admin reference. */
+  .bg-app {
+    background-color: #f8fafc;
+    background-image:
+      radial-gradient(60rem 30rem at 10% -10%, rgb(219 234 254 / 0.7), transparent 60%),
+      linear-gradient(to right, rgb(148 163 184 / 0.08) 1px, transparent 1px),
+      linear-gradient(to bottom, rgb(148 163 184 / 0.08) 1px, transparent 1px);
+    background-size: auto, 32px 32px, 32px 32px;
+  }
+  .label-mono {
+    @apply font-mono text-[11px] font-semibold uppercase tracking-wider;
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Auth card: a skewed "blade" sweeps across to swap Student / Admin.  */
+/* The blade is one skewed rectangle; its inner layer applies the exact */
+/* inverse transform, so the copy inside stays upright and fixed in     */
+/* card co-ordinates and is only revealed where the blade passes.       */
+/* ------------------------------------------------------------------ */
+.auth-stage {
+  background-color: #050b18;
+  background-image:
+    radial-gradient(60rem 32rem at 50% -8%, rgb(37 99 235 / 0.35), transparent 62%),
+    radial-gradient(40rem 24rem at 100% 100%, rgb(6 182 212 / 0.18), transparent 60%),
+    linear-gradient(to right, rgb(148 163 184 / 0.06) 1px, transparent 1px),
+    linear-gradient(to bottom, rgb(148 163 184 / 0.06) 1px, transparent 1px);
+  background-size: auto, auto, 36px 36px, 36px 36px;
+}
+
+.auth {
+  --rake: 12deg;
+  --sweep: 38.57%; /* blade rests on the right (Student) */
+  --dur: 1000ms;
+  --ease: cubic-bezier(0.76, 0, 0.18, 1);
+  position: relative;
+  overflow: hidden;
+  border-radius: 28px;
+  background: linear-gradient(160deg, #ffffff 0%, #f1f7fd 100%);
+  box-shadow: 0 40px 90px -30px rgb(0 0 0 / 0.75), 0 0 0 1px rgb(148 197 255 / 0.18);
+  animation: auth-rise 0.8s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+.auth[data-mode="admin"] {
+  --sweep: -67.14%; /* blade rests on the left (Admin) */
+}
+.auth[data-mode="admin"][data-step="otp"] {
+  --rake: 8deg;
+}
+
+.auth__band {
+  position: absolute;
+  top: -2px;
+  bottom: -2px;
+  left: 0;
+  width: 140%;
+  overflow: hidden;
+  background:
+    radial-gradient(60% 50% at 70% 10%, rgb(34 211 238 / 0.22), transparent 70%),
+    radial-gradient(50% 50% at 20% 100%, rgb(37 99 235 / 0.45), transparent 70%),
+    linear-gradient(135deg, #081a3f 0%, #0b2f73 48%, #0a5f86 100%);
+  transform: skewX(var(--rake)) translateX(var(--sweep));
+  transition: transform var(--dur) var(--ease);
+  will-change: transform;
+}
+.auth__inner {
+  position: absolute;
+  inset: 0;
+  transform: translateX(calc(-1 * var(--sweep))) skewX(calc(-1 * var(--rake)));
+  transition: transform var(--dur) var(--ease);
+  will-change: transform;
+}
+/* Card-sized box: band is 140% of the card, so this is 100/1.4 of the band. */
+.auth__page {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: calc(100% / 1.4);
+}
+.auth__edge {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: linear-gradient(180deg, transparent 0%, #67e8f9 20%, #ffffff 50%, #67e8f9 80%, transparent 100%);
+  box-shadow: 0 0 22px 3px rgb(34 211 238 / 0.55);
+}
+.auth__edge--lead { left: 0; }
+.auth__edge--trail { right: 0; }
+
+.auth__copy {
+  position: absolute;
+  top: 50%;
+  width: 34%;
+  color: #fff;
+  opacity: 0;
+  transform: translateY(-46%);
+  transition: opacity 0.35s ease, transform 0.5s ease;
+  pointer-events: none;
+}
+.auth__copy--student { left: 62%; }
+.auth__copy--admin { left: 6%; }
+.auth__copy.is-on {
+  opacity: 1;
+  transform: translateY(-50%);
+  transition-delay: calc(var(--dur) * 0.62);
+}
+.auth__flash {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  translate: -50% -50%;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  font-size: 1.6rem;
+  color: #e0f7ff;
+  opacity: 0;
+  text-shadow: 0 0 24px rgb(34 211 238 / 0.7);
+}
+.auth[data-moving="true"] .auth__flash {
+  animation: auth-flash var(--dur) ease both;
+}
+
+.auth__pane {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 46%;
+  padding: 44px 52px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  overflow-y: auto;
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(10px);
+  transition: opacity 0.3s ease, transform 0.3s ease, visibility 0s linear 0.3s;
+}
+.auth__pane--student { left: 0; }
+.auth__pane--admin { right: 0; }
+.auth__pane.is-on {
+  opacity: 1;
+  visibility: visible;
+  transform: none;
+  transition-delay: 0s;
+}
+.auth__pane.is-on .stg {
+  animation: auth-fade-up 0.55s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  animation-delay: calc(var(--i, 0) * 60ms + 120ms);
+}
+
+.auth__tabs { display: none; }
+
+.anim-shake { animation: auth-shake 0.45s ease both; }
+.anim-pop { animation: auth-pop 0.4s cubic-bezier(0.2, 0.9, 0.3, 1.4) both; }
+.anim-slide-in { animation: auth-fade-up 0.3s ease both; }
+
+@media (min-width: 768px) {
+  .auth { height: clamp(500px, calc(100svh - 210px), 640px); }
+  .auth-stage { height: 100svh; min-height: 0; overflow: hidden; }
+  .auth__pane { overflow: hidden; padding-top: 28px; padding-bottom: 28px; }
+  html:has(.auth-stage) { overflow: hidden; }
+}
+@media (max-width: 767px) {
+  .auth__band { display: none; }
+  .auth__tabs { display: grid; }
+  .auth__pane {
+    position: static;
+    width: auto;
+    padding: 28px 22px 32px;
+    display: none;
+    transform: none;
+    visibility: visible;
+    opacity: 1;
+  }
+  .auth__pane.is-on { display: flex; }
+}
+
+@keyframes auth-rise {
+  from { opacity: 0; transform: translateY(24px) scale(0.985); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes auth-fade-up {
+  from { opacity: 0; transform: translateY(14px); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes auth-flash {
+  0%, 28% { opacity: 0; transform: scale(0.92); }
+  45%, 58% { opacity: 1; transform: scale(1); }
+  76%, 100% { opacity: 0; transform: scale(1.06); }
+}
+@keyframes auth-shake {
+  10%, 90% { transform: translateX(-1px); }
+  20%, 80% { transform: translateX(3px); }
+  30%, 50%, 70% { transform: translateX(-6px); }
+  40%, 60% { transform: translateX(6px); }
+}
+@keyframes auth-pop {
+  from { opacity: 0; transform: scale(0.7) translateY(6px); }
+  to { opacity: 1; transform: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .auth, .auth__band, .auth__inner, .auth__copy, .auth__pane,
+  .auth__pane.is-on .stg, .anim-shake, .anim-pop, .anim-slide-in { animation: none !important; transition-duration: 0.01ms !important; transition-delay: 0s !important; }
+  .auth__flash { display: none; }
+}
+
+/* ------------------------------ Landing page ------------------------------ */
+html:has(.landing) { scroll-behavior: smooth; }
+.lp-bg {
+  background-color: #f8fbff;
+  background-image:
+    radial-gradient(52rem 30rem at 12% -6%, rgb(191 219 254 / 0.75), transparent 62%),
+    radial-gradient(44rem 28rem at 96% 8%, rgb(254 205 211 / 0.45), transparent 60%),
+    radial-gradient(40rem 26rem at 70% 60%, rgb(165 243 252 / 0.28), transparent 62%);
+  background-repeat: no-repeat;
+}
+.lp-in { animation: lp-up 0.8s cubic-bezier(0.2, 0.8, 0.2, 1) both; animation-delay: var(--d, 0ms); }
+.lp-hidden { opacity: 0; transform: translateY(26px); }
+.lp-shown { animation: lp-up 0.8s cubic-bezier(0.2, 0.8, 0.2, 1) both; animation-delay: var(--d, 0ms); }
+.lp-float { animation: lp-float 6s ease-in-out infinite; }
+.lp-drift { animation: lp-drift 11s ease-in-out infinite; }
+@keyframes lp-up { from { opacity: 0; transform: translateY(26px); } to { opacity: 1; transform: none; } }
+@keyframes lp-float { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-10px); } }
+@keyframes lp-drift { 0%, 100% { transform: translate(0, 0) rotate(0deg); } 50% { transform: translate(10px, -14px) rotate(8deg); } }
+@media (prefers-reduced-motion: reduce) {
+  .lp-in, .lp-shown, .lp-float, .lp-drift { animation: none !important; }
+  .lp-hidden { opacity: 1; transform: none; }
+  html:has(.landing) { scroll-behavior: auto; }
+}
+
+/* ------------------------- App motion foundation ------------------------- */
+:root { --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1); }
+.app-in { animation: app-up 0.55s var(--ease-out) both; }
+.stg-i { animation: app-up 0.5s var(--ease-out) both; animation-delay: calc(var(--i, 0) * 55ms); }
+.card-hover { transition: transform 0.25s var(--ease-out), box-shadow 0.25s var(--ease-out), border-color 0.25s; }
+.card-hover:hover { transform: translateY(-3px); border-color: rgb(147 197 253); box-shadow: 0 18px 40px -18px rgb(37 99 235 / 0.4); }
+.press { transition: transform 0.15s var(--ease-out), box-shadow 0.2s, background-color 0.2s, filter 0.2s; }
+.press:active:not(:disabled) { transform: scale(0.97); }
+.skel { position: relative; overflow: hidden; background: rgb(226 232 240 / 0.7); border-radius: 0.5rem; }
+.skel::after { content: ""; position: absolute; inset: 0; transform: translateX(-100%); background: linear-gradient(90deg, transparent, rgb(255 255 255 / 0.75), transparent); animation: app-shimmer 1.3s infinite; }
+.bar-grow { transform-origin: left center; animation: app-bar 0.9s var(--ease-out) both; animation-delay: calc(var(--i, 0) * 60ms + 120ms); }
+.bar-rise { transform-origin: bottom center; animation: app-rise 0.8s var(--ease-out) both; animation-delay: calc(var(--i, 0) * 50ms + 100ms); }
+.backdrop-enter { animation: app-fade 0.2s ease both; }
+.modal-enter { animation: app-pop 0.28s var(--ease-out) both; }
+.toast-enter { animation: app-toast 0.35s var(--ease-out) both; }
+.slide-down { animation: app-slide-down 0.35s var(--ease-out) both; }
+.pulse-dot { animation: app-pulse 1.8s ease-in-out infinite; }
+
+/* Tables */
+.tbl { width: 100%; text-align: left; font-size: 0.875rem; border-collapse: separate; border-spacing: 0; }
+.tbl thead th { position: sticky; top: 0; background: rgb(248 250 252 / 0.95); font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: rgb(100 116 139); padding: 0.7rem 0.75rem; border-bottom: 1px solid rgb(226 232 240); }
+.tbl tbody td { padding: 0.8rem 0.75rem; border-bottom: 1px solid rgb(241 245 249); }
+.tbl tbody tr { animation: app-up 0.45s var(--ease-out) both; animation-delay: calc(var(--i, 0) * 30ms); transition: background-color 0.15s; }
+.tbl tbody tr:hover { background: rgb(239 246 255 / 0.7); }
+.tbl tbody tr:last-child td { border-bottom: 0; }
+
+/* Switch */
+.switch { position: relative; width: 2.5rem; height: 1.5rem; border-radius: 9999px; background: rgb(203 213 225); transition: background-color 0.25s; flex-shrink: 0; }
+.switch::after { content: ""; position: absolute; top: 2px; left: 2px; width: 1.25rem; height: 1.25rem; border-radius: 9999px; background: #fff; box-shadow: 0 1px 3px rgb(0 0 0 / 0.3); transition: transform 0.25s var(--ease-out); }
+.switch[aria-checked="true"] { background: linear-gradient(90deg, #2563eb, #06b6d4); }
+.switch[aria-checked="true"]::after { transform: translateX(1rem); }
+
+@keyframes app-up { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
+@keyframes app-fade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes app-pop { from { opacity: 0; transform: translateY(12px) scale(0.96); } to { opacity: 1; transform: none; } }
+@keyframes app-toast { from { opacity: 0; transform: translateX(24px); } to { opacity: 1; transform: none; } }
+@keyframes app-slide-down { from { opacity: 0; transform: translateY(-12px); } to { opacity: 1; transform: none; } }
+@keyframes app-bar { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+@keyframes app-rise { from { transform: scaleY(0); } to { transform: scaleY(1); } }
+@keyframes app-shimmer { to { transform: translateX(100%); } }
+@keyframes app-pulse { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.45; transform: scale(1.5); } }
+@media (prefers-reduced-motion: reduce) {
+  .app-in, .stg-i, .bar-grow, .bar-rise, .backdrop-enter, .modal-enter, .toast-enter, .slide-down, .pulse-dot, .tbl tbody tr, .skel::after { animation: none !important; }
+  .card-hover, .press, .switch, .switch::after { transition: none !important; }
+  .card-hover:hover { transform: none; }
+}
+@keyframes confirm-bar { from { transform: scaleX(1); } to { transform: scaleX(0); } }
+.indeterminate { position: relative; overflow: hidden; }
+.indeterminate::after { content: ""; position: absolute; inset: 0; width: 40%; border-radius: inherit; background: linear-gradient(90deg, #2563eb, #06b6d4); animation: app-indeterminate 1.2s ease-in-out infinite; }
+@keyframes app-indeterminate { from { transform: translateX(-100%); } to { transform: translateX(260%); } }
+.dz-drag { animation: app-dz 0.9s ease-in-out infinite; }
+@keyframes app-dz { 0%, 100% { box-shadow: 0 0 0 0 rgb(37 99 235 / 0.35); } 50% { box-shadow: 0 0 0 10px rgb(37 99 235 / 0); } }
+@media (prefers-reduced-motion: reduce) { .indeterminate::after, .dz-drag { animation: none !important; } }
+.timer-low { animation: app-timer 1s ease-in-out infinite; }
+@keyframes app-timer { 0%, 100% { transform: scale(1); box-shadow: 0 0 0 0 rgb(239 68 68 / 0.4); } 50% { transform: scale(1.06); box-shadow: 0 0 0 8px rgb(239 68 68 / 0); } }
+@media (prefers-reduced-motion: reduce) { .timer-low { animation: none !important; } }
+.key-flash { animation: app-flash 1.6s ease-out; }
+@keyframes app-flash { 0% { box-shadow: 0 0 0 0 rgb(245 158 11 / 0.7); } 40% { box-shadow: 0 0 0 8px rgb(245 158 11 / 0.35); } 100% { box-shadow: 0 0 0 0 rgb(245 158 11 / 0); } }
+@media (prefers-reduced-motion: reduce) { .key-flash { animation: none !important; } }
