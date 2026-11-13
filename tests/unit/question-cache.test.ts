@@ -31,3 +31,36 @@ describe("getOptionCounts", () => {
     expect(b.get("t2-q")).toBe(5);
   });
 });
+
+import { getStartQuestions } from "@/lib/question-cache";
+import { clearMemLimits, memHit } from "@/lib/mem-limit";
+
+describe("getStartQuestions", () => {
+  beforeEach(() => clearOptionCountsCache());
+
+  it("serves the question payload from memory within the TTL", async () => {
+    const load = vi.fn(async () => [{ id: "q1", text: "2+2?", options: ["3", "4"], marks: 1 }]);
+    const a = await getStartQuestions("t1", load, 1_000);
+    const b = await getStartQuestions("t1", load, 30_000);
+    expect(b).toBe(a);
+    expect(load).toHaveBeenCalledTimes(1);
+    await getStartQuestions("t1", load, 70_000);
+    expect(load).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("memHit", () => {
+  beforeEach(() => clearMemLimits());
+
+  it("allows up to the limit, then blocks, then resets after the window", () => {
+    expect([1, 2, 3].map(() => memHit("k", 3, 1_000, 0))).toEqual([true, true, true]);
+    expect(memHit("k", 3, 1_000, 10)).toBe(false);
+    expect(memHit("k", 3, 1_000, 1_500)).toBe(true);
+  });
+
+  it("counts keys separately", () => {
+    expect(memHit("a", 1, 1_000, 0)).toBe(true);
+    expect(memHit("b", 1, 1_000, 0)).toBe(true);
+    expect(memHit("a", 1, 1_000, 5)).toBe(false);
+  });
+});

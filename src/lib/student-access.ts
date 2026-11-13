@@ -24,4 +24,17 @@ export async function loadOwnedAttempt(attemptId: string, studentId: string) {
   return attempt;
 }
 
+/**
+ * Minimal ownership check for hot paths (autosave, integrity events): one small query, no test join.
+ * Same 404 for "missing" and "someone else's". Callers handle the deadline / finalizing themselves.
+ */
+export async function loadAttemptLite(attemptId: string, studentId: string) {
+  const attempt = await db.attempt.findUnique({
+    where: { id: attemptId },
+    select: { id: true, studentId: true, status: true, expiresAt: true, testId: true },
+  });
+  if (!attempt || attempt.studentId !== studentId) throw new HttpError(404, "Not found");
+  return attempt;
+}
+
 export type TestState = "upcoming" | "open" | "closed" | "in_progress" | "submitted" | "expired";

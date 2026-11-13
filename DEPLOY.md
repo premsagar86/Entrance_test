@@ -85,7 +85,12 @@ It uses `DIRECT_URL` from your `.env`. Keep migrations backward-compatible (add 
 
 ## A6a. Planning for 300-500 students at once
 
-What the app already does to stay light: autosave sends only changed answers, every 10 s; the question list is cached in memory for 60 s on each server instance; scoring and timing run on the server.
+What the app already does to stay light:
+- Autosave sends only changed answers, every 10 s, as one database statement per request.
+- Student sessions are cached in memory for 30 s per server instance, so most requests skip the session lookup. A logout or a new login elsewhere can take up to 30 s to reach every instance. Admin sessions are never cached.
+- The question list and each test's start payload are cached in memory for 60 s per instance, so a question edit on a live test shows up within a minute.
+- Autosave and integrity events use a light in-memory limiter instead of a database write, and the hot paths load only the few attempt columns they need.
+- Scoring and timing run on the server.
 
 Settings to apply on Vercel:
 - `DATABASE_URL` (Neon **pooled** URL) ends with `?sslmode=require&pgbouncer=true&connection_limit=1&connect_timeout=30`. `DIRECT_URL` stays the non-pooled URL.

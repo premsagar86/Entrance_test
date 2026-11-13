@@ -7,6 +7,7 @@ import { hit } from "@/lib/rate-limit";
 import { GRACE_MS, finalizeAttempt } from "@/lib/attempts";
 import { audit } from "@/lib/audit";
 import { activeMaintenance } from "@/lib/announcements";
+import { getStartQuestions } from "@/lib/question-cache";
 
 export const dynamic = "force-dynamic";
 
@@ -22,10 +23,10 @@ export async function POST(req: Request, { params }: { params: { id: string } })
     // Same 404 whether the test does not exist, is unpublished, or is not assigned to this student.
     const test = await db.test.findFirst({
       where: { id: testId, status: "PUBLISHED", assignments: { some: { studentId } } },
-      include: { questions: { orderBy: { order: "asc" }, select: { id: true, text: true, options: true, marks: true } } },
     });
     if (!test) throw new HttpError(404, "Test not found");
-    if (test.questions.length === 0) throw new HttpError(409, "This test has no questions yet");
+    const questions = await getStartQuestions(testId);
+    if (questions.length === 0) throw new HttpError(409, "This test has no questions yet");
 
     const now = Date.now();
     let attempt = await db.attempt.findUnique({ where: { testId_studentId: { testId, studentId } } });
@@ -64,7 +65,7 @@ export async function POST(req: Request, { params }: { params: { id: string } })
       expiresAt: attempt.expiresAt,
       serverNow: now,
       // correctOption and explanation are deliberately never selected here.
-      questions: test.questions,
+      questions,
       answers: Object.fromEntries(saved.map((a) => [a.questionId, a.selectedOption])),
     });
   } catch (e) {

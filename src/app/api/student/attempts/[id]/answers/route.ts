@@ -3,9 +3,10 @@ import { z } from "zod";
 import { db } from "@/lib/db";
 import { HttpError, handleError, requireStudent } from "@/lib/auth";
 import { parseJson, parseParam } from "@/lib/http";
-import { hit } from "@/lib/rate-limit";
+import { Prisma } from "@prisma/client";
+import { memHit } from "@/lib/mem-limit";
 import { GRACE_MS, finalizeAttempt } from "@/lib/attempts";
-import { loadOwnedAttempt } from "@/lib/student-access";
+import { loadAttemptLite } from "@/lib/student-access";
 import { getOptionCounts } from "@/lib/question-cache";
 
 export const dynamic = "force-dynamic";
@@ -23,10 +24,9 @@ export async function PUT(req: Request, { params }: { params: { id: string } }) 
     const attemptId = parseParam(z.string().min(1).max(40), params.id);
     const body = await parseJson(req, schema, 128 * 1024);
 
-    const lim = await hit(`stu:autosave:${studentId}`, { limit: 120, windowMs: 60_000 });
-    if (!lim.allowed) throw new HttpError(429, "Saving too quickly");
+    if (!memHit(`autosave:${studentId}`, 120, 60_000)) throw new HttpError(429, "Saving too quickly");
 
-    const attempt = await loadOwnedAttempt(attemptId, studentId);
+    const attempt = await loadAttemptLite(attemptId, studentId);
     if (attempt.status !== "IN_PROGRESS") {
       return NextResponse.json({ error: "This attempt is already finished.", expired: true }, { status: 409 });
     }
@@ -46,15 +46,13 @@ export async function PUT(req: Request, { params }: { params: { id: string } }) 
     // Last write wins per question within one batch.
     const latest = new Map(body.answers.map((a) => [a.questionId, a.selectedOption] as const));
 
-    await db.$transaction(
-      Array.from(latest).map(([questionId, selectedOption]) =>
-        db.answer.upsert({
-          where: { attemptId_questionId: { attemptId, questionId } },
-          create: { attemptId, questionId, selectedOption },
-          update: { selectedOption, answeredAt: new Date() },
-        }),
-      ),
-    );
+    // One statement for the whole batch (insert, or update when the answer already exists).
+    const rows = Array.from(latest, ([questionId, selectedOption]) => Prisma.sql`(${attemptId}::text, ${questionId}::text, ${selectedOption}::int, now())`);
+    await db.$executeRaw`
+      INSERT INTO answers (attempt_id, question_id, selected_option, answered_at)
+      VALUES ${Prisma.join(rows)}
+      ON CONFLICT (attempt_id, question_id)
+      DO UPDATE SET selected_option = EXCLUDED.selected_option, answered_at = now()`;
     return NextResponse.json({ ok: true, saved: latest.size, serverNow: Date.now() });
   } catch (e) {
     return handleError(e);

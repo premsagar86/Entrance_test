@@ -49,11 +49,32 @@ export interface SessionInfo {
   userId: string;
 }
 
+/**
+ * Short in-memory cache of validated STUDENT sessions (per server instance). Every API call re-checks the
+ * session, which would otherwise be one database read per request; with hundreds of students autosaving that
+ * is the biggest avoidable load. Revocation (logout / new login elsewhere) can take up to the TTL to reach
+ * other instances, which is acceptable for students. Admin sessions are never cached.
+ */
+const SESSION_CACHE_TTL_MS = 30_000;
+const SESSION_CACHE_MAX = 5_000;
+const sessionCache = new Map<string, { info: SessionInfo; cachedAt: number; expiresAt: number; absoluteExpiresAt: number }>();
+
+function cacheSession(idHash: string, info: SessionInfo, expiresAt: number, absoluteExpiresAt: number) {
+  if (sessionCache.size >= SESSION_CACHE_MAX) sessionCache.delete(sessionCache.keys().next().value as string);
+  sessionCache.set(idHash, { info, cachedAt: Date.now(), expiresAt, absoluteExpiresAt });
+}
+
 /** Validates the cookie against the DB and slides the idle window. */
 export async function getSession(userType: UserType): Promise<SessionInfo | null> {
   const token = cookies().get(COOKIE_NAMES[userType])?.value;
   if (!token) return null;
-  const row = await db.session.findUnique({ where: { idHash: sha256(token) } });
+  const idHash = sha256(token);
+  if (userType === "STUDENT") {
+    const c = sessionCache.get(idHash);
+    const t = Date.now();
+    if (c && t - c.cachedAt < SESSION_CACHE_TTL_MS && t < c.expiresAt && t < c.absoluteExpiresAt) return c.info;
+  }
+  const row = await db.session.findUnique({ where: { idHash } });
   const now = new Date();
   if (
     !row ||
@@ -62,19 +83,25 @@ export async function getSession(userType: UserType): Promise<SessionInfo | null
     row.expiresAt <= now ||
     row.absoluteExpiresAt <= now
   ) {
+    sessionCache.delete(idHash);
     return null;
   }
   const idleMs = SESSION_POLICY[userType].idleMs;
   const next = new Date(Math.min(now.getTime() + idleMs, row.absoluteExpiresAt.getTime()));
-  if (next.getTime() - row.expiresAt.getTime() > MIN) {
+  let expiresAtMs = row.expiresAt.getTime();
+  if (next.getTime() - expiresAtMs > MIN) {
     await db.session.update({ where: { idHash: row.idHash }, data: { expiresAt: next } });
+    expiresAtMs = next.getTime();
   }
-  return { userType: row.userType, userId: row.userId };
+  const info = { userType: row.userType, userId: row.userId };
+  if (userType === "STUDENT") cacheSession(idHash, info, expiresAtMs, row.absoluteExpiresAt.getTime());
+  return info;
 }
 
 export async function destroySession(userType: UserType) {
   const token = cookies().get(COOKIE_NAMES[userType])?.value;
   if (token) {
+    sessionCache.delete(sha256(token));
     await db.session.updateMany({
       where: { idHash: sha256(token), revokedAt: null },
       data: { revokedAt: new Date() },

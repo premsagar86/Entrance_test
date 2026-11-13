@@ -1,3 +1,4 @@
+import type { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
 
 /**
@@ -28,6 +29,34 @@ export async function getOptionCounts(testId: string, load: Loader = loadFromDb,
   return value;
 }
 
+/** Question payload sent to a student at test start (never includes the correct answer). */
+export interface StartQuestion {
+  id: string;
+  text: string;
+  options: Prisma.JsonValue;
+  marks: number;
+}
+
+const startCache = new Map<string, { at: number; value: StartQuestion[] }>();
+
+const loadStartQuestions = (testId: string): Promise<StartQuestion[]> =>
+  db.question.findMany({ where: { testId }, orderBy: { order: "asc" }, select: { id: true, text: true, options: true, marks: true } });
+
+/** Cached per instance for a short time, so hundreds of simultaneous starts do not each re-read every question. */
+export async function getStartQuestions(
+  testId: string,
+  load: (testId: string) => Promise<StartQuestion[]> = loadStartQuestions,
+  now: number = Date.now(),
+): Promise<StartQuestion[]> {
+  const hit = startCache.get(testId);
+  if (hit && now - hit.at < TTL_MS) return hit.value;
+  const value = await load(testId);
+  if (startCache.size >= MAX_ENTRIES) startCache.delete(startCache.keys().next().value as string);
+  startCache.set(testId, { at: now, value });
+  return value;
+}
+
 export function clearOptionCountsCache() {
   cache.clear();
+  startCache.clear();
 }
