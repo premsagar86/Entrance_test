@@ -1,0 +1,31 @@
+name: DB backup
+
+# Weekly encrypted pg_dump of the Neon database, kept as a private workflow artifact for 30 days.
+# The dump contains student data: use this only in a PRIVATE repository.
+on:
+  schedule:
+    - cron: "0 2 * * 0"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  dump:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Dump and encrypt
+        env:
+          NEON_DIRECT_URL: ${{ secrets.NEON_DIRECT_URL }}
+          BACKUP_PASSPHRASE: ${{ secrets.BACKUP_PASSPHRASE }}
+        run: |
+          set -euo pipefail
+          docker run --rm -e URL="$NEON_DIRECT_URL" postgres:17-alpine sh -c 'pg_dump --no-owner "$URL"' | gzip > db.sql.gz
+          gzip -t db.sql.gz
+          gpg --batch --yes --pinentry-mode loopback --symmetric --cipher-algo AES256 --passphrase "$BACKUP_PASSPHRASE" -o "db-$(date +%Y%m%d).sql.gz.gpg" db.sql.gz
+          rm db.sql.gz
+      - uses: actions/upload-artifact@v4
+        with:
+          name: db-backup
+          path: db-*.sql.gz.gpg
+          retention-days: 30

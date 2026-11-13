@@ -159,14 +159,14 @@ function DeliveryNotice({ info }: { info: OtpRequestResult | null }) {
   if (info.delivery === "console") {
     return (
       <Warn title="Email is not configured, so nothing was emailed.">
-        The code was printed in the server terminal (where <code>npm run dev</code> runs). Add <code>MAIL_FROM</code> (a sender verified in Brevo) to <code>.env</code> to send real emails.
+        The code was printed in the server terminal (where <code>npm run dev</code> runs). Add <code>SMTP_HOST</code>, <code>SMTP_USER</code>, <code>SMTP_PASS</code> and <code>MAIL_FROM</code> to <code>.env</code> to send real emails.
       </Warn>
     );
   }
   if (info.delivery === "failed") {
     return (
       <Warn title="The email could not be sent.">
-        The mail provider rejected the request. Check <code>BREVO_API_KEY</code> and that <code>MAIL_FROM</code> is a verified sender. See the server terminal for the exact error.
+        The SMTP server rejected the request. Check the <code>SMTP_*</code> settings and that <code>MAIL_FROM</code> is an allowed sender. See the server terminal for the exact error.
       </Warn>
     );
   }
