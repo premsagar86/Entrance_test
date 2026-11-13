@@ -1,10 +1,10 @@
-FROM node:20-alpine AS deps
+FROM node:25-alpine AS deps
 WORKDIR /app
 RUN apk add --no-cache openssl
 COPY package.json package-lock.json ./
 RUN npm ci --legacy-peer-deps
 
-FROM node:20-alpine AS build
+FROM node:25-alpine AS build
 WORKDIR /app
 RUN apk add --no-cache openssl
 ARG NEXT_PUBLIC_TURNSTILE_SITE_KEY=
@@ -18,7 +18,7 @@ FROM build AS tools
 ENV NODE_ENV=production
 CMD ["npx", "prisma", "migrate", "deploy"]
 
-FROM node:20-alpine AS run
+FROM node:25-alpine AS run
 WORKDIR /app
 RUN apk add --no-cache openssl
 ENV NODE_ENV=production PORT=3000 HOSTNAME=0.0.0.0 STORAGE_DIR=/app/storage
