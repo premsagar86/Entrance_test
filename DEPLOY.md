@@ -117,6 +117,27 @@ curl -s https://<DOMAIN>/api/health
 
 **Rollback:** check out the previous tag, rebuild and `docker compose up -d`. Migrations are forward-only: if the release added a migration, restore the pre-update database backup (section 8) before rolling back the code.
 
+## 7a. Automated CI/CD (GitHub Actions)
+
+Flow: push/merge to `main` -> **CI** (`ci.yml`: lint, typecheck, tests, build, `prisma migrate deploy` against a Postgres service, Docker build smoke test) -> **Deploy** (`deploy.yml`: build + push `ghcr.io/<owner>/<repo>:sha-<short>` and `:sha-<short>-tools`, then SSH to the server, back up, pull, migrate, `up -d`, health check, **auto-rollback to the previous tag on failure**).
+
+One-time setup:
+
+1. **Server**: run `scripts/server-setup.sh` as root on a fresh VPS (Docker, firewall, fail2ban, `deploy` user, swap). Then as `deploy`: `git clone <repo> /opt/aptitude` (use a read-only GitHub deploy key if the repo is private), create `.env` (section 4) and do the **first deploy manually** (section 5) so the volumes, admin seed and certificate exist.
+2. **SSH key for Actions**: `ssh-keygen -t ed25519 -f gha_deploy -N ""`; append `gha_deploy.pub` to `/home/deploy/.ssh/authorized_keys`.
+3. **GitHub -> Settings -> Secrets and variables -> Actions** (repository secrets): `SSH_HOST` (server IP/DNS), `SSH_USER` (`deploy`), `SSH_KEY` (contents of the private `gha_deploy`), `NEXT_PUBLIC_TURNSTILE_SITE_KEY`.
+4. **Settings -> Environments -> New environment `production`**; optionally add required reviewers for manual approval.
+5. **Settings -> Branches -> protect `main`**: require the `verify` and `docker` checks and PRs.
+6. **Settings -> Actions -> General -> Workflow permissions**: read and write (needed to push to GHCR). Packages inherit the repo's visibility; the server pulls using the job's short-lived token, so no PAT is needed.
+
+Operating it:
+
+- Deploy = merge to `main`. Manual re-run: Actions -> Deploy -> *Run workflow*.
+- The deployed tag is stored in `/opt/aptitude/.deployed_tag`. Manual rollback: `TAG=sha-xxxxxxx docker compose up -d` (check out the matching commit first if compose files changed).
+- Rollback does not undo migrations. Keep migrations backward-compatible (add columns/tables first, remove in a later release); the pre-deploy backup is in `/var/backups/aptitude`.
+- Freeze deploys during live exams (disable the workflow or protect the `production` environment with reviewers).
+- Staging (optional): clone to `/opt/aptitude-staging` with its own `.env`/`DOMAIN` and add a second workflow triggered on a `develop` branch.
+
 ## 8. Backups and restore
 
 Backup (database dump + uploads):

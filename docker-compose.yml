@@ -1,3 +1,5 @@
+# Images are published to GHCR by .github/workflows/deploy.yml (tags: sha-<short>, sha-<short>-tools).
+# On the server: TAG=sha-xxxxxxx docker compose pull. Locally: docker compose build.
 services:
   db:
     image: postgres:16-alpine
@@ -20,6 +22,7 @@ services:
   #   docker compose run --rm migrate npx tsx prisma/seed.ts           (create the admin)
   #   docker compose run --rm migrate npx tsx scripts/cleanup-attempts.ts
   migrate:
+    image: ${IMAGE:-ghcr.io/premsagar86/entrance_test}:${TAG:-latest}-tools
     build:
       context: .
       target: tools
@@ -35,6 +38,7 @@ services:
       DIRECT_URL: postgresql://aptitude:${POSTGRES_PASSWORD}@db:5432/aptitude
 
   app:
+    image: ${IMAGE:-ghcr.io/premsagar86/entrance_test}:${TAG:-latest}
     build:
       context: .
       target: run
