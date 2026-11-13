@@ -63,11 +63,11 @@ export async function POST(req: Request, { params }: { params: { id: string } })
     if (!limit.allowed) throw new HttpError(429, "Too many uploads. Try again later.");
 
     const declared = Number(req.headers.get("content-length") ?? 0);
-    if (declared > MAX_UPLOAD_BYTES + 64 * 1024) throw new HttpError(413, "File is larger than 10 MB");
+    if (declared > MAX_UPLOAD_BYTES + 64 * 1024) throw new HttpError(413, "File is larger than 4 MB");
     const form = await req.formData().catch(() => null);
     const file = form?.get("file");
     if (!(file instanceof File)) throw new HttpError(400, "No file provided");
-    if (file.size > MAX_UPLOAD_BYTES) throw new HttpError(413, "File is larger than 10 MB");
+    if (file.size > MAX_UPLOAD_BYTES) throw new HttpError(413, "File is larger than 4 MB");
 
     const buf = Buffer.from(await file.arrayBuffer());
     let kind;

@@ -34,7 +34,7 @@ export function BulkAnswerKey({ testId, questions, onDone }: { testId: string; q
     setError("");
     if (!file) return;
     if (!ALLOWED.test(file.name)) return setError("Upload a PDF, Word, Excel, CSV or text file.");
-    if (file.size > 10 * 1024 * 1024) return setError("File is larger than 10 MB.");
+    if (file.size > 4 * 1024 * 1024) return setError("File is larger than 4 MB.");
     setReading(true);
     const res = await uploadFile<{ text: string }>(`/api/admin/tests/${testId}/answer-key`, file);
     setReading(false);

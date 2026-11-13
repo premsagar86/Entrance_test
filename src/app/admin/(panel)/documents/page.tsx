@@ -23,7 +23,7 @@ interface UploadResult {
   lowConfidence: number;
 }
 
-const MAX_BYTES = 10 * 1024 * 1024;
+const MAX_BYTES = 4 * 1024 * 1024;
 const ALLOWED = /\.(pdf|docx|xlsx|txt|csv|png|jpe?g)$/i;
 const STATUS_TONE = { UPLOADED: "gray", PARSING: "amber", PARSED: "green", FAILED: "red" } as const;
 
@@ -52,7 +52,7 @@ export default function DocumentsPage() {
     if (!file) return;
     if (!ALLOWED.test(file.name)) return setError("Allowed types: PDF, DOCX, XLSX, TXT, CSV, PNG, JPG.");
     if (file.size === 0) return setError("That file is empty.");
-    if (file.size > MAX_BYTES) return setError("File is larger than 10 MB.");
+    if (file.size > MAX_BYTES) return setError("File is larger than 4 MB.");
     setBusy(true);
     const res = await uploadFile<UploadResult>("/api/admin/documents", file);
     setBusy(false);
@@ -96,7 +96,7 @@ export default function DocumentsPage() {
             {busy ? <Sparkles className="h-7 w-7 animate-pulse" /> : <FileUp className="h-7 w-7" />}
           </span>
           <p className="mt-4 text-lg font-semibold text-slate-900">{busy ? "Reading your document..." : dragging ? "Drop it here" : "Drag a file here, or choose one"}</p>
-          <p className="mt-1 text-sm text-slate-500">PDF, DOCX, XLSX, TXT, CSV, PNG or JPG. Up to 10 MB.</p>
+          <p className="mt-1 text-sm text-slate-500">PDF, DOCX, XLSX, TXT, CSV, PNG or JPG. Up to 4 MB.</p>
           {busy ? (
             <div className="indeterminate mx-auto mt-5 h-1.5 w-56 rounded-full bg-slate-200" />
           ) : (

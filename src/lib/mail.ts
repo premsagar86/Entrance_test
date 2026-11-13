@@ -1,5 +1,5 @@
 export interface MailResult {
-  provider: "brevo" | "resend" | "console";
+  provider: "brevo" | "console";
   messageId?: string;
 }
 
@@ -25,34 +25,20 @@ async function sendViaBrevo(key: string, from: string, to: string, subject: stri
   return { provider: "brevo", messageId: data.messageId };
 }
 
-async function sendViaResend(key: string, from: string, to: string, subject: string, text: string): Promise<MailResult> {
-  const res = await fetch("https://api.resend.com/emails", {
-    method: "POST",
-    headers: { authorization: `Bearer ${key}`, "content-type": "application/json" },
-    body: JSON.stringify({ from, to, subject, text }),
-    signal: AbortSignal.timeout(10_000),
-  });
-  if (!res.ok) throw new Error(`Resend send failed (${res.status})`);
-  const data = (await res.json().catch(() => ({}))) as { id?: string };
-  return { provider: "resend", messageId: data.id };
-}
-
 /**
- * Sends a plain-text email and reports which provider accepted it.
- * Provider order: Brevo, then Resend. MAIL_FROM must be a sender verified with the provider.
+ * Sends a plain-text email through the Brevo API. Needs BREVO_API_KEY and MAIL_FROM
+ * (MAIL_FROM must be a sender verified in Brevo).
  * In development with nothing configured the message is printed to the server console
  * and the result says provider "console" so callers can tell no real email went out.
  */
 export async function sendMail(to: string, subject: string, text: string): Promise<MailResult> {
   const from = process.env.MAIL_FROM;
-  const brevo = process.env.BREVO_API_KEY;
-  const resend = process.env.RESEND_API_KEY;
+  const key = process.env.BREVO_API_KEY;
 
-  if (from && brevo) return sendViaBrevo(brevo, from, to, subject, text);
-  if (from && resend) return sendViaResend(resend, from, to, subject, text);
+  if (from && key) return sendViaBrevo(key, from, to, subject, text);
 
   if (process.env.NODE_ENV === "production") throw new Error("Mail is not configured");
-  if (brevo || resend) console.warn("[mail] A provider key is set but MAIL_FROM is missing; printing instead of sending.");
+  if (key) console.warn("[mail] BREVO_API_KEY is set but MAIL_FROM is missing; printing instead of sending.");
   console.log(`[dev mail] to=${to} subject=${subject}\n${text}`);
   return { provider: "console" };
 }

@@ -9,7 +9,7 @@ Decisions: **Next.js 14 (full-stack, TypeScript) + PostgreSQL**, scale **under 5
 1. **Hosting**: commercial status unknown, so **Option B (self-hosted VPS: Docker Compose + Caddy)** is the primary deployment. Option A (Vercel Hobby) is non-commercial only and has a 10 s function limit.
 2. **Marking**: no negative marking (column kept, default 0). 1 mark per question by default.
 3. **Results**: shown instantly after submit (`results_released_at` set on submit). Admin can optionally hold results per test. Correct answers are hidden unless the admin enables it.
-4. **Admin OTP**: by email (Resend free tier). Default, not yet confirmed.
+4. **Admin OTP**: by email (Brevo API). Default, not yet confirmed.
 5. **Answer keys**: mixed. Questions with no key get `correct_option = NULL` and **a test cannot be published until every question has a key**.
 
 ## Remaining gaps to handle in the build
@@ -38,7 +38,7 @@ Decisions: **Next.js 14 (full-stack, TypeScript) + PostgreSQL**, scale **under 5
 | Database | **Neon Postgres** (or Supabase) | use the pooled connection string |
 | ORM | Prisma | parameterized queries |
 | File storage | **Cloudflare R2** (or Supabase Storage) | uploads, never public |
-| Email (OTP, notices) | **Resend** (or Brevo / Gmail SMTP) | free tier |
+| Email (OTP, notices) | **Brevo** API | free tier |
 | Bot protection | **Cloudflare Turnstile** | free CAPTCHA |
 | AI extraction | **Google Gemini API (free tier)** | also reads scanned PDFs/images, so no OCR library needed |
 | Parsing | mammoth (DOCX), pdfjs-dist (PDF), xlsx (XLSX/CSV) | |
@@ -71,7 +71,7 @@ Browser (Student UI / Admin UI)  -- HTTPS -->  Next.js 14 (App Router)
                                                       |
                           +---------------------------+-----------------------+
                     Neon Postgres (Prisma)     Cloudflare R2 (files)       Gemini API (extraction)
-                                               Resend (email OTP)          Turnstile (CAPTCHA)
+                                               Brevo (email OTP)          Turnstile (CAPTCHA)
 ```
 - **Auth**: server-side sessions. Middleware is only a coarse guard; **every route handler re-checks session and role** (middleware-only auth is bypassable, cf. CVE-2025-29927).
 - **Orchestration** (attempt lifecycle): `start` creates an attempt with `expires_at = now + duration` (server clock), answers autosave every 10-15 s in one batched request, `submit` locks the attempt in a DB transaction, scoring runs on the server, result is stored, then shown or released.
@@ -97,7 +97,7 @@ Docker Compose with Next.js, Postgres and Caddy (automatic HTTPS). Full control,
 ```
 DATABASE_URL, DIRECT_URL            # Neon pooled and direct
 SESSION_SECRET, DOB_PEPPER          # long random strings
-RESEND_API_KEY, MAIL_FROM
+BREVO_API_KEY, MAIL_FROM
 TURNSTILE_SITE_KEY, TURNSTILE_SECRET
 GEMINI_API_KEY
 R2_ACCOUNT_ID, R2_ACCESS_KEY, R2_SECRET_KEY, R2_BUCKET
@@ -106,7 +106,7 @@ SEED_ADMIN_EMAIL, SEED_ADMIN_PHONE
 Never commit `.env`; set these in the host's dashboard.
 
 ## Accounts to create first
-GitHub, Vercel, Neon, Cloudflare (R2 + Turnstile), Resend, Google AI Studio (Gemini key). All free to sign up.
+GitHub, Vercel, Neon, Cloudflare (R2 + Turnstile), Brevo, Google AI Studio (Gemini key). All free to sign up.
 
 ## Project structure
 ```
@@ -125,7 +125,7 @@ In-app notices such as "App launched today" or "Staff are busy / scheduled maint
 - **Banner**: admin writes a notice (title, message, type `INFO | MAINTENANCE | WARNING | RELEASE_NOTE`, audience `STUDENT | ADMIN | ALL`, start and end time). Shown as a dismissible banner on the login page (safe public notices only), student dashboard and admin panel.
 - **What's New dialog**: a `RELEASE_NOTE` announcement shows once as a modal after login, then is remembered as seen per user.
 - **Maintenance mode**: a flag that shows a message and blocks starting new tests (running attempts continue).
-- **Later (optional)**: email students when a test is assigned (Resend); web push via a PWA. Play Store style push does not apply because this is a web app.
+- **Later (optional)**: email students when a test is assigned (Brevo); web push via a PWA. Play Store style push does not apply because this is a web app.
 - **Security**: body is plain text (React-escaped, no HTML), length cap, admin-only writes with audit log, public endpoint exposes only audience ALL and no user data.
 
 ## Database schema
@@ -209,7 +209,7 @@ Optional extras: `GET /api/time` (server clock for the timer) and `GET /api/heal
 - CSRF: SameSite=Strict + Origin/Host check + custom header on state-changing requests. CORS same-origin only.
 
 **Secrets, infrastructure, data**
-- Secrets only in environment variables, never committed (`.env` in `.gitignore`). Gemini and Resend keys are server-side only. Rotate keys.
+- Secrets only in environment variables, never committed (`.env` in `.gitignore`). Gemini and Brevo keys are server-side only. Rotate keys.
 - Database not exposed publicly (use the provider's pooled, TLS connection), least-privilege DB user. On a VPS: non-root minimal Docker image, firewall allows 80/443 only.
 - Encrypted backups. PII minimization, retention policy and deletion process, with a consent notice on first login.
 

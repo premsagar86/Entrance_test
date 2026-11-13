@@ -1,6 +1,6 @@
 export type FileKind = "pdf" | "docx" | "xlsx" | "txt" | "csv" | "png" | "jpg";
 
-export const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
+export const MAX_UPLOAD_BYTES = 4 * 1024 * 1024;
 const MAX_ZIP_ENTRIES = 2000;
 const MAX_ZIP_UNCOMPRESSED = 50 * 1024 * 1024;
 
@@ -75,7 +75,7 @@ function looksLikeText(buf: Buffer): boolean {
  */
 export function validateUpload(filename: string, buf: Buffer): FileKind {
   if (buf.length === 0) throw new UploadError("File is empty");
-  if (buf.length > MAX_UPLOAD_BYTES) throw new UploadError("File is larger than 10 MB");
+  if (buf.length > MAX_UPLOAD_BYTES) throw new UploadError("File is larger than 4 MB");
   const claimed = ext(filename);
 
   const isPdf = buf.subarray(0, 5).toString("latin1") === "%PDF-";
