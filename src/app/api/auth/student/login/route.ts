@@ -19,6 +19,9 @@ const schema = z.union([
 
 const FAIL = () => NextResponse.json({ error: "Invalid credentials" }, { status: 401 });
 const WINDOW = 15 * 60_000;
+// Many students can share one public IP (a lab or campus network), so this is generous. The per-email
+// limit below is the real brute-force guard. Tune with LOGIN_IP_LIMIT.
+const IP_LIMIT = Math.max(30, Number(process.env.LOGIN_IP_LIMIT) || 600);
 
 export async function POST(req: Request) {
   try {
@@ -26,7 +29,7 @@ export async function POST(req: Request) {
     const body = await parseJson(req, schema);
     const email = body.email.trim().toLowerCase();
 
-    const byIp = await hit(`stu:ip:${ip}`, { limit: 30, windowMs: WINDOW });
+    const byIp = await hit(`stu:ip:${ip}`, { limit: IP_LIMIT, windowMs: WINDOW });
     const byEmail = await hit(`stu:email:${email}`, { limit: 5, windowMs: WINDOW, lockMs: WINDOW });
     if (!byIp.allowed || !byEmail.allowed) {
       const wait = Math.max(byIp.retryAfterSec, byEmail.retryAfterSec);

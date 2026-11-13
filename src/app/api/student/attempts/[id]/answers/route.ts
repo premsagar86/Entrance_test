@@ -6,6 +6,7 @@ import { parseJson, parseParam } from "@/lib/http";
 import { hit } from "@/lib/rate-limit";
 import { GRACE_MS, finalizeAttempt } from "@/lib/attempts";
 import { loadOwnedAttempt } from "@/lib/student-access";
+import { getOptionCounts } from "@/lib/question-cache";
 
 export const dynamic = "force-dynamic";
 
@@ -36,8 +37,7 @@ export async function PUT(req: Request, { params }: { params: { id: string } }) 
     }
 
     // Only accept real questions of this test, with an option index that exists.
-    const questions = await db.question.findMany({ where: { testId: attempt.testId }, select: { id: true, options: true } });
-    const optionCount = new Map(questions.map((q) => [q.id, Array.isArray(q.options) ? q.options.length : 0]));
+    const optionCount = await getOptionCounts(attempt.testId);
     for (const a of body.answers) {
       const n = optionCount.get(a.questionId);
       if (n === undefined) throw new HttpError(400, "Unknown question");

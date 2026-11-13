@@ -81,7 +81,28 @@ It uses `DIRECT_URL` from your `.env`. Keep migrations backward-compatible (add 
 - **Vercel Hobby**: non-commercial only; uploads are limited to **4 MB** per file (request body cap, enforced in the app); function time limits apply to document parsing, so very large scanned PDFs may time out (prefer text-based files).
 - **Neon free**: compute scales to zero when idle, so the first request after a quiet period is slower. Before an exam, open `/api/health` a few minutes early. Storage and compute are limited.
 - **Brevo**: optional and unused by sign-in.
-- **Before a large exam**: load-test login and autosave on a preview deployment, take a manual backup (run the *DB backup* workflow), and do not deploy during the exam.
+- **Large exams**: see A6a below.
+
+## A6a. Planning for 300-500 students at once
+
+What the app already does to stay light: autosave sends only changed answers, every 10 s; the question list is cached in memory for 60 s on each server instance; scoring and timing run on the server.
+
+Settings to apply on Vercel:
+- `DATABASE_URL` (Neon **pooled** URL) ends with `?sslmode=require&pgbouncer=true&connection_limit=1&connect_timeout=30`. `DIRECT_URL` stays the non-pooled URL.
+- `LOGIN_IP_LIMIT` (optional, default 600): student sign-in attempts per public IP per 15 minutes. Many students on one campus network share one IP, so the old limit of 30 would have locked most of them out. Set it to a little above the number of students sharing one network (for 500 students, 600) and lower it for smaller groups. The per-email limit (5 attempts) still protects each account.
+
+Before the real exam:
+1. **Load test it.** Create a separate staging Vercel project + Neon database that uses Cloudflare's always-pass Turnstile test keys (see the header of `scripts/loadtest/k6-exam.js`). Create a published test with a few questions, then:
+   ```bash
+   npm run loadtest:seed -- <testId> 500        # makes 500 throwaway students (batch LOADTEST)
+   k6 run -e BASE_URL=https://your-staging.vercel.app -e TEST_ID=<testId> -e VUS=500 scripts/loadtest/k6-exam.js
+   npm run loadtest:seed -- --clean             # removes them afterwards
+   ```
+   Pass if: error rate under 1 %, p95 under 1.5 s, no 429 or 500. Watch the Neon dashboard (CPU, connections) while it runs.
+2. **Wake the database** by opening `/api/health` about 5 minutes before the start. Neon's free plan sleeps when idle.
+3. **Stagger the start** with a start window (`startAt`/`endAt`) so 500 people do not sign in in the same second.
+4. **Do not deploy** during the exam. Take a manual `pg_dump` first.
+5. **If the load test fails:** upgrade Neon (more compute, no cold starts) first. Vercel Hobby is for non-commercial use only; if this is a paid or institutional exam, use Vercel Pro.
 
 ## A7. Troubleshooting
 
