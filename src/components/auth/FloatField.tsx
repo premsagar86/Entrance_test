@@ -29,7 +29,7 @@ export function FloatField({
           className="peer h-10 w-full border-b border-slate-300 bg-transparent pr-9 text-[15px] text-slate-900 outline-none transition-colors"
         />
         <span
-          className={`pointer-events-none absolute left-0 top-[34px] origin-left text-[15px] text-slate-500 transition-all duration-200 peer-focus:-translate-y-[22px] peer-focus:scale-[0.8] peer-focus:text-brand-600 peer-[:not(:placeholder-shown)]:-translate-y-[22px] peer-[:not(:placeholder-shown)]:scale-[0.8] peer-[:not(:placeholder-shown)]:text-brand-600 ${alwaysFloat ? floated : ""}`}
+          className={`pointer-events-none absolute left-0 top-[34px] origin-left text-[15px] text-slate-500 transition-all duration-200 peer-focus:-translate-y-[22px] peer-focus:scale-[0.8] peer-focus:text-brand-600 peer-[:not(:placeholder-shown)]:-translate-y-[22px] peer-[:not(:placeholder-shown)]:scale-[0.8] peer-[:not(:placeholder-shown)]:text-brand-600 peer-autofill:-translate-y-[22px] peer-autofill:scale-[0.8] peer-autofill:text-brand-600 ${alwaysFloat ? floated : ""}`}
         >
           {label}
         </span>
