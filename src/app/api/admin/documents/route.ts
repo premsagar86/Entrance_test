@@ -52,7 +52,13 @@ export async function POST(req: Request) {
       throw e;
     }
 
-    const key = await saveFile(buf, kind);
+    let key: string;
+    try {
+      key = await saveFile(buf, kind);
+    } catch (e) {
+      console.error("document storage failed", e);
+      throw new HttpError(503, "File storage is unavailable. Check the R2 settings and try again.");
+    }
     const doc = await db.document.create({
       data: { filename, path: key, mime: MIME[kind], status: "PARSING", uploadedBy: admin.userId },
       select: { id: true },
