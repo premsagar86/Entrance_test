@@ -10,6 +10,7 @@ export const dynamic = "force-dynamic";
 const schema = z.union([
   z.strictObject({ studentIds: z.array(z.string().max(40)).min(1).max(2000) }),
   z.strictObject({ batch: z.string().min(1).max(60) }),
+  z.strictObject({ batches: z.array(z.string().min(1).max(60)).min(1).max(100) }),
   z.strictObject({ all: z.literal(true) }),
 ]);
 
@@ -21,7 +22,7 @@ export async function POST(req: Request, { params }: { params: { id: string } })
     if (!(await db.test.findUnique({ where: { id: testId }, select: { id: true } }))) {
       return NextResponse.json({ error: "Not found" }, { status: 404 });
     }
-    const where = "studentIds" in b ? { id: { in: b.studentIds } } : "batch" in b ? { batch: b.batch } : {};
+    const where = "studentIds" in b ? { id: { in: b.studentIds } } : "batches" in b ? { batch: { in: b.batches } } : "batch" in b ? { batch: b.batch } : {};
     const students = await db.student.findMany({ where, select: { id: true } });
     const r = await db.testAssignment.createMany({
       data: students.map((s) => ({ testId, studentId: s.id })),

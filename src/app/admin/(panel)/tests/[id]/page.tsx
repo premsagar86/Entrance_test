@@ -3,9 +3,9 @@
 import { useCallback, useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
-import { BarChart3, CheckCircle2, ListChecks, Plus, Send, Settings2, UserPlus } from "lucide-react";
+import { BarChart3, CheckCircle2, ListChecks, Plus, Send, Settings2, UserPlus, X } from "lucide-react";
 import { api, errorMessage } from "@/lib/client-api";
-import { Badge, Button, Empty, FieldError, LinkButton, PageHeader, Panel, Skeleton, SkeletonRows, Toggle, formatDate, fromLocalInput, toLocalInput } from "@/components/admin";
+import { Badge, Button, Empty, FieldError, LinkButton, PageHeader, Panel, Select, Skeleton, SkeletonRows, Toggle, formatDate, fromLocalInput, toLocalInput } from "@/components/admin";
 import { useToast } from "@/components/Toast";
 import { ErrorText, Field, Segmented } from "@/components/ui";
 import { QuestionCard, QuestionForm, type Question } from "@/components/QuestionEditor";
@@ -265,13 +265,27 @@ function SettingsPanel({ test, onSaved }: { test: TestDetail; onSaved: () => voi
 function AssignPanel({ testId, assigned, onDone }: { testId: string; assigned: number; onDone: () => void }) {
   const toast = useToast();
   const [mode, setMode] = useState<"all" | "batch">("all");
-  const [batch, setBatch] = useState("");
+  const [batches, setBatches] = useState<{ name: string; count: number }[]>([]);
+  const [total, setTotal] = useState(0);
+  const [picked, setPicked] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
 
+  useEffect(() => {
+    api<{ items: { name: string; count: number }[]; total: number }>("GET", "/api/admin/batches").then((res) => {
+      if (res.ok) {
+        setBatches(res.data.items);
+        setTotal(res.data.total);
+      }
+    });
+  }, []);
+
+  const remaining = batches.filter((b) => !picked.includes(b.name));
+  const pickedCount = batches.filter((b) => picked.includes(b.name)).reduce((s, b) => s + b.count, 0);
+
   async function assign() {
-    if (mode === "batch" && !batch.trim()) return toast("Enter a batch name.", "error");
+    if (mode === "batch" && picked.length === 0) return toast("Select at least one batch.", "error");
     setBusy(true);
-    const res = await api<{ assigned: number; matched: number }>("POST", `/api/admin/tests/${testId}/assign`, mode === "all" ? { all: true } : { batch: batch.trim() });
+    const res = await api<{ assigned: number; matched: number }>("POST", `/api/admin/tests/${testId}/assign`, mode === "all" ? { all: true } : { batches: picked });
     setBusy(false);
     if (!res.ok) return toast(errorMessage(res), "error");
     toast(res.data.matched === 0 ? "No students matched." : `${res.data.assigned} newly assigned (${res.data.matched} matched).`, res.data.matched === 0 ? "error" : "success");
@@ -280,17 +294,50 @@ function AssignPanel({ testId, assigned, onDone }: { testId: string; assigned: n
 
   return (
     <Panel index={3} icon={UserPlus} title="Assign to students" description={`${assigned} student${assigned === 1 ? "" : "s"} currently assigned. Students only see published tests assigned to them.`}>
-      <div className="flex flex-wrap items-end gap-3">
-        <div className="w-64">
-          <Segmented value={mode} onChange={setMode} options={[{ value: "all", label: "All students" }, { value: "batch", label: "A batch" }]} />
+      <div className="space-y-4">
+        <div className="max-w-sm">
+          <Segmented value={mode} onChange={setMode} options={[{ value: "all", label: "All students" }, { value: "batch", label: "Selected batches" }]} />
         </div>
-        {mode === "batch" && (
-          <div className="slide-down w-48">
-            <input className="input-base h-10" placeholder="Batch name" aria-label="Batch name" value={batch} onChange={(e) => setBatch(e.target.value)} maxLength={60} />
+
+        {mode === "all" ? (
+          <p className="slide-down text-sm text-slate-600">
+            The test will be sent to <strong>every student</strong>{total ? ` (${total})` : ""}.
+          </p>
+        ) : (
+          <div className="slide-down space-y-3">
+            <div className="max-w-sm">
+              <Select
+                aria-label="Add a batch"
+                value=""
+                disabled={remaining.length === 0}
+                onChange={(e) => e.target.value && setPicked([...picked, e.target.value])}
+              >
+                <option value="">{batches.length === 0 ? "No batches yet" : remaining.length === 0 ? "All batches selected" : "Select a batch to add..."}</option>
+                {remaining.map((b) => (
+                  <option key={b.name} value={b.name}>
+                    {b.name} ({b.count} student{b.count === 1 ? "" : "s"})
+                  </option>
+                ))}
+              </Select>
+            </div>
+            {picked.length > 0 && (
+              <div className="flex flex-wrap items-center gap-2">
+                {picked.map((name) => (
+                  <span key={name} className="inline-flex items-center gap-1.5 rounded-full bg-brand-50 py-1 pl-3 pr-1.5 text-sm font-medium text-brand-700">
+                    {name}
+                    <button type="button" aria-label={`Remove ${name}`} onClick={() => setPicked(picked.filter((x) => x !== name))} className="flex h-5 w-5 items-center justify-center rounded-full hover:bg-brand-100">
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                  </span>
+                ))}
+                <span className="font-mono text-xs text-slate-500">{pickedCount} students</span>
+              </div>
+            )}
           </div>
         )}
+
         <Button variant="primary" busy={busy} onClick={assign}>
-          Assign
+          {mode === "all" ? "Send to all students" : `Send to ${picked.length || ""} batch${picked.length === 1 ? "" : "es"}`.replace("  ", " ")}
         </Button>
       </div>
     </Panel>
