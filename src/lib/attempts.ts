@@ -1,8 +1,11 @@
-import type { AttemptStatus, Prisma } from "@prisma/client";
+import type { AttemptStatus } from "@prisma/client";
 import { db } from "./db";
 import { scoreAttempt } from "./scoring";
 
 export const GRACE_MS = 5_000;
+
+/** Prisma's default interactive-transaction timeout is 5 s, too short on a slow or remote database. */
+const TX_OPTIONS = { maxWait: 10_000, timeout: 20_000 };
 
 export interface FinalResult {
   attemptId: string;
@@ -49,13 +52,12 @@ export async function finalizeAttempt(attemptId: string, finalStatus: "SUBMITTED
     }
 
     const now = new Date();
-    const ops: Prisma.PrismaPromise<unknown>[] = attempt.answers.map((a) =>
-      tx.answer.update({
-        where: { attemptId_questionId: { attemptId, questionId: a.questionId } },
-        data: { isCorrect: r.outcomes.get(a.questionId) ?? null },
-      }),
-    );
-    await Promise.all(ops);
+    // Two set-based updates instead of one query per answer: far fewer round trips inside the transaction.
+    const idsWhere = (outcome: boolean) => attempt.answers.filter((a) => r.outcomes.get(a.questionId) === outcome).map((a) => a.questionId);
+    const correctIds = idsWhere(true);
+    const wrongIds = idsWhere(false);
+    if (correctIds.length) await tx.answer.updateMany({ where: { attemptId, questionId: { in: correctIds } }, data: { isCorrect: true } });
+    if (wrongIds.length) await tx.answer.updateMany({ where: { attemptId, questionId: { in: wrongIds } }, data: { isCorrect: false } });
     await tx.attempt.update({
       where: { id: attemptId },
       data: { status: finalStatus, score: Math.round(r.score), submittedAt: now },
@@ -71,7 +73,7 @@ export async function finalizeAttempt(attemptId: string, finalStatus: "SUBMITTED
       unanswered: r.unanswered,
       submittedAt: now,
     };
-  });
+  }, TX_OPTIONS);
 }
 
 /** Results are visible once the attempt is finished, unless the admin is holding them. */
