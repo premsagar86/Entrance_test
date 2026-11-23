@@ -2,7 +2,10 @@ import type { z } from "zod";
 import { HttpError, assertSameOrigin } from "./auth";
 
 export function clientIp(req: Request): string {
-  // Caddy sets X-Forwarded-For; take the left-most (client) address.
+  // Behind Cloudflare the real client address is CF-Connecting-IP (set by Cloudflare, not spoofable
+  // as long as traffic reaches the origin through Cloudflare).
+  const cf = req.headers.get("cf-connecting-ip")?.trim();
+  if (cf) return cf;
   const xff = req.headers.get("x-forwarded-for");
   return xff?.split(",")[0]?.trim() || "unknown";
 }

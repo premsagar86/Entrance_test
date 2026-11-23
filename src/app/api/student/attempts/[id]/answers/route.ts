@@ -48,9 +48,12 @@ export async function PUT(req: Request, { params }: { params: { id: string } }) 
 
     // One statement for the whole batch (insert, or update when the answer already exists).
     const rows = Array.from(latest, ([questionId, selectedOption]) => Prisma.sql`(${attemptId}::text, ${questionId}::text, ${selectedOption}::int, now())`);
+    // The EXISTS guard stops a late autosave from landing after the attempt was submitted/scored.
     await db.$executeRaw`
       INSERT INTO answers (attempt_id, question_id, selected_option, answered_at)
-      VALUES ${Prisma.join(rows)}
+      SELECT v.a, v.q, v.s, v.t
+      FROM (VALUES ${Prisma.join(rows)}) AS v(a, q, s, t)
+      WHERE EXISTS (SELECT 1 FROM attempts WHERE id = ${attemptId} AND status = 'IN_PROGRESS')
       ON CONFLICT (attempt_id, question_id)
       DO UPDATE SET selected_option = EXCLUDED.selected_option, answered_at = now()`;
     return NextResponse.json({ ok: true, saved: latest.size, serverNow: Date.now() });

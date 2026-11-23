@@ -14,12 +14,22 @@ export function liveWhere(audiences: Audience[], now = new Date()): Prisma.Annou
  * Maintenance mode = a live MAINTENANCE announcement that targets students.
  * While it is live, students cannot START a test (running attempts continue and can still save and submit).
  */
-export async function activeMaintenance(): Promise<{ title: string; body: string } | null> {
-  return db.announcement.findFirst({
+type Maintenance = { title: string; body: string } | null;
+const MAINTENANCE_TTL_MS = 5_000;
+let maintenanceCache: { at: number; value: Maintenance } | null = null;
+
+// Cached per server instance for a few seconds: every student's Start would otherwise run this query.
+// An admin turning maintenance on or off takes effect within MAINTENANCE_TTL_MS.
+export async function activeMaintenance(): Promise<Maintenance> {
+  const now = Date.now();
+  if (maintenanceCache && now - maintenanceCache.at < MAINTENANCE_TTL_MS) return maintenanceCache.value;
+  const value = await db.announcement.findFirst({
     where: { ...liveWhere(["STUDENT", "ALL"]), type: "MAINTENANCE" },
     select: { title: true, body: true },
     orderBy: { createdAt: "desc" },
   });
+  maintenanceCache = { at: now, value };
+  return value;
 }
 
 export type AnnouncementStatus = "inactive" | "scheduled" | "live" | "expired";

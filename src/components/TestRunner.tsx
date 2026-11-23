@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { AlertTriangle, Bookmark, CheckCircle2, Check, ChevronLeft, ChevronRight, Clock, CloudOff, Loader2, Send } from "lucide-react";
-import { api, errorMessage } from "@/lib/client-api";
+import { api, errorMessage, type ApiResult } from "@/lib/client-api";
 import { Button, Spinner } from "@/components/admin";
 import { Modal } from "@/components/Modal";
 import { ErrorText, Logo } from "@/components/ui";
@@ -35,10 +35,25 @@ interface StartResponse {
 }
 
 type Phase = "loading" | "intro" | "blocked" | "starting" | "running" | "submitting";
-type SaveState = "saved" | "saving" | "unsaved" | "offline";
+type SaveState = "saved" | "saving" | "unsaved" | "offline" | "signedout";
 
 const LETTERS = "ABCDEF";
 const AUTOSAVE_MS = 10_000;
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+/** Backoff with jitter so 1000 clients do not retry in lockstep. */
+const backoff = (attempt: number, capMs = 15_000) => Math.min(capMs, 1000 * 2 ** attempt) * (0.5 + Math.random() * 0.5);
+const transient = (status: number) => status === 0 || status === 429 || status >= 500;
+
+/** Retries network errors, 429 and 5xx a few times with jittered backoff. */
+async function withRetry<T>(fn: () => Promise<ApiResult<T>>, tries = 6): Promise<ApiResult<T>> {
+  let res = await fn();
+  for (let i = 0; i < tries && !res.ok && transient(res.status); i++) {
+    await sleep(backoff(i));
+    res = await fn();
+  }
+  return res;
+}
 
 function fmt(ms: number): string {
   const s = Math.max(0, Math.ceil(ms / 1000));
@@ -72,10 +87,13 @@ export function TestRunner({ testId }: { testId: string }) {
   const autoSubmitted = useRef(false);
   const attemptRef = useRef("");
   const saveTimer = useRef<number>();
+  const failures = useRef(0);
+  const nextTry = useRef(0);
+  const submitting = useRef(false);
 
   // ---- load test info (decides which screen to show) ----
   useEffect(() => {
-    api<{ items: TestInfo[] }>("GET", "/api/student/tests").then((res) => {
+    withRetry(() => api<{ items: TestInfo[] }>("GET", "/api/student/tests")).then((res) => {
       if (!res.ok) {
         setError(errorMessage(res));
         return setPhase("blocked");
@@ -95,10 +113,12 @@ export function TestRunner({ testId }: { testId: string }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [testId]);
 
-  async function begin() {
+  async function begin(jitter = false) {
     setPhase("starting");
     setError("");
-    const res = await api<StartResponse>("POST", `/api/student/tests/${testId}/start`);
+    // Spread the start burst: everyone pressing Start together would hit the server in the same second.
+    if (jitter) await sleep(Math.random() * 3000);
+    const res = await withRetry(() => api<StartResponse>("POST", `/api/student/tests/${testId}/start`));
     if (!res.ok) {
       const finished = (res.data as { finished?: boolean; attemptId?: string }).finished;
       if (finished && (res.data as { attemptId?: string }).attemptId) return router.replace(`/result/${(res.data as { attemptId: string }).attemptId}`);
@@ -115,17 +135,24 @@ export function TestRunner({ testId }: { testId: string }) {
   }
 
   // ---- autosave ----
-  const flush = useCallback(async (): Promise<boolean> => {
+  const flush = useCallback(async (force = false, keepalive = false): Promise<boolean> => {
     if (flushing.current) return false;
     if (pending.current.size === 0) return true;
+    if (!force && Date.now() < nextTry.current) return false; // backing off after a failure
     flushing.current = true;
     setSave("saving");
     const batch = new Map(pending.current);
-    const res = await api<{ expired?: boolean }>("PUT", `/api/student/attempts/${attemptRef.current}/answers`, {
-      answers: Array.from(batch, ([questionId, selectedOption]) => ({ questionId, selectedOption })),
-    });
+    const res = await api<{ expired?: boolean; serverNow?: number }>(
+      "PUT",
+      `/api/student/attempts/${attemptRef.current}/answers`,
+      { answers: Array.from(batch, ([questionId, selectedOption]) => ({ questionId, selectedOption })) },
+      { keepalive },
+    );
     flushing.current = false;
     if (res.ok) {
+      failures.current = 0;
+      nextTry.current = 0;
+      if (typeof res.data.serverNow === "number") offset.current = res.data.serverNow - Date.now(); // re-sync the timer
       // Keep entries that changed again while this request was in flight.
       batch.forEach((v, k) => {
         if (pending.current.get(k) === v) pending.current.delete(k);
@@ -137,38 +164,61 @@ export function TestRunner({ testId }: { testId: string }) {
       router.replace(`/result/${attemptRef.current}`); // time is up or already submitted
       return false;
     }
-    setSave(res.status === 0 ? "offline" : "unsaved");
+    failures.current += 1;
+    nextTry.current = Date.now() + backoff(failures.current);
+    setSave(res.status === 401 ? "signedout" : res.status === 0 ? "offline" : "unsaved");
     return false;
   }, [router]);
 
   useEffect(() => {
     if (phase !== "running") return;
-    const t = setInterval(flush, AUTOSAVE_MS);
-    return () => clearInterval(t);
+    const t = setInterval(() => void flush(), AUTOSAVE_MS);
+    // Save immediately when the tab is hidden or closed, and when the connection returns.
+    const now = () => void flush(true, true);
+    const onVis = () => { if (document.visibilityState === "hidden") now(); };
+    document.addEventListener("visibilitychange", onVis);
+    window.addEventListener("pagehide", now);
+    window.addEventListener("online", now);
+    return () => {
+      clearInterval(t);
+      document.removeEventListener("visibilitychange", onVis);
+      window.removeEventListener("pagehide", now);
+      window.removeEventListener("online", now);
+    };
   }, [phase, flush]);
 
   // ---- submit ----
   const submit = useCallback(async () => {
+    if (submitting.current) return; // a click and the auto-submit must not overlap
+    submitting.current = true;
     setSubmitError("");
     setPhase("submitting");
-    // Retry the final save a few times so answers are not lost on a flaky connection.
-    let saved = pending.current.size === 0;
-    for (let i = 0; i < 3 && !saved; i++) {
-      saved = await flush();
-      if (!saved) await new Promise((r) => setTimeout(r, 800));
+    const auto = autoSubmitted.current;
+    // Best-effort final save of the last answers.
+    for (let i = 0; i < 3 && pending.current.size > 0; i++) {
+      if (await flush(true)) break;
+      await sleep(800);
     }
-    if (!saved && pending.current.size > 0 && !autoSubmitted.current) {
+    if (pending.current.size > 0 && !auto) {
       setSubmitError("Your last answers could not be saved. Check your connection and try again.");
       setPhase("running");
+      submitting.current = false;
       return;
     }
-    const res = await api("POST", `/api/student/attempts/${attemptRef.current}/submit`);
-    if (!res.ok) {
-      setSubmitError(errorMessage(res, "Could not submit."));
-      setPhase("running");
-      return;
+    // When time is up we keep retrying until the server confirms; a manual submit gives up after a few tries.
+    for (let i = 0; ; i++) {
+      const res = await api("POST", `/api/student/attempts/${attemptRef.current}/submit`);
+      // 409 = already finished by the server; either way the result page is the right place to go.
+      if (res.ok || res.status === 409) return void router.replace(`/result/${attemptRef.current}`);
+      if (!auto && i >= 3) {
+        setSubmitError(errorMessage(res, "Could not submit."));
+        setPhase("running");
+        submitting.current = false;
+        return;
+      }
+      setSubmitError(res.status === 401 ? "Your session expired. Sign in again in a new tab; your answers are safe and this will keep retrying." : "Submitting... retrying. Do not close this page.");
+      await sleep(backoff(i, 8000));
     }
-    router.replace(`/result/${attemptRef.current}`);
   }, [flush, router]);
 
   // ---- timer ----
@@ -223,7 +273,7 @@ export function TestRunner({ testId }: { testId: string }) {
     setSave("unsaved");
     // Save soon after a change, without waiting for the 10 s tick.
     window.clearTimeout(saveTimer.current);
-    saveTimer.current = window.setTimeout(flush, 1500);
+    saveTimer.current = window.setTimeout(() => void flush(), 1500);
   }
 
   const answered = useMemo(() => questions.filter((q) => answers[q.id] !== null && answers[q.id] !== undefined).length, [questions, answers]);
@@ -262,7 +312,7 @@ export function TestRunner({ testId }: { testId: string }) {
             {info.endAt && <li>This test closes at {new Date(info.endAt).toLocaleString()}; your time is capped by that.</li>}
           </ul>
           <div className="mt-7 flex gap-3">
-            <Button variant="primary" className="flex-1" onClick={begin}>Start test</Button>
+            <Button variant="primary" className="flex-1" onClick={() => void begin(true)}>Start test</Button>
             <Link href="/dashboard" className="inline-flex h-10 items-center rounded-lg border border-slate-300 px-4 text-sm font-medium hover:bg-slate-50">Not now</Link>
           </div>
         </div>
@@ -378,7 +428,7 @@ export function TestRunner({ testId }: { testId: string }) {
       </div>
 
       <Modal open={confirming || phase === "submitting"} onClose={() => { setConfirming(false); setSubmitError(""); }} dismissible={phase !== "submitting"} label="Submit test">
-        <h2 className="text-lg font-semibold">Submit your test?</h2>
+        <h2 className="text-lg font-semibold">{autoSubmitted.current ? "Time is up, submitting..." : "Submit your test?"}</h2>
         <ul className="mt-3 space-y-1 text-sm text-slate-600">
           <li className="flex items-center gap-2"><CheckCircle2 className="h-4 w-4 text-emerald-600" /> {answered} answered</li>
           <li className={`flex items-center gap-2 ${unanswered ? "font-medium text-amber-700" : ""}`}><AlertTriangle className="h-4 w-4" /> {unanswered} not answered</li>
@@ -387,8 +437,8 @@ export function TestRunner({ testId }: { testId: string }) {
         <p className="mt-3 text-sm text-slate-500">You cannot change your answers after submitting.</p>
         <div className="mt-3"><ErrorText message={submitError} /></div>
         <div className="mt-5 flex gap-3">
-          <Button variant="primary" className="flex-1" busy={phase === "submitting"} onClick={submit}>Yes, submit</Button>
-          <Button data-autofocus disabled={phase === "submitting"} onClick={() => { setConfirming(false); setSubmitError(""); }}>Go back</Button>
+          <Button variant="primary" className="flex-1" busy={phase === "submitting"} onClick={() => void submit()}>Yes, submit</Button>
+          <Button data-autofocus disabled={phase === "submitting"} className={phase === "submitting" ? "hidden" : ""} onClick={() => { setConfirming(false); setSubmitError(""); }}>Go back</Button>
         </div>
       </Modal>
     </div>
@@ -400,6 +450,7 @@ function Centered({ children }: { children: React.ReactNode }) {
 }
 
 function SaveBadge({ state }: { state: SaveState }) {
+  if (state === "signedout") return <span className="flex items-center gap-1 text-xs font-medium text-red-600"><CloudOff className="h-3.5 w-3.5" /> Signed out. <a href="/login" target="_blank" rel="noreferrer" className="underline">Sign in again</a></span>;
   if (state === "saving") return <span className="hidden items-center gap-1 text-xs text-slate-500 sm:flex"><Loader2 className="h-3.5 w-3.5 animate-spin" /> Saving</span>;
   if (state === "offline") return <span className="flex items-center gap-1 text-xs font-medium text-red-600"><CloudOff className="h-3.5 w-3.5" /> Offline, will retry</span>;
   if (state === "unsaved") return <span className="hidden text-xs text-slate-500 sm:block">Unsaved changes</span>;

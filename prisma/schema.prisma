@@ -80,6 +80,7 @@ model Session {
   createdAt         DateTime  @default(now()) @map("created_at")
 
   @@index([userType, userId])
+  @@index([absoluteExpiresAt])
   @@map("sessions")
 }
 
@@ -103,6 +104,7 @@ model RateLimit {
   windowStart DateTime  @map("window_start")
   lockedUntil DateTime? @map("locked_until")
 
+  @@index([windowStart])
   @@map("rate_limits")
 }
 
@@ -165,6 +167,7 @@ model TestAssignment {
   student   Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
 
   @@id([testId, studentId])
+  @@index([studentId])
   @@map("test_assignments")
 }
 
@@ -183,6 +186,8 @@ model Attempt {
   events      AttemptEvent[]
 
   @@unique([testId, studentId])
+  @@index([studentId])
+  @@index([status, expiresAt])
   @@map("attempts")
 }
 
@@ -196,6 +201,7 @@ model Answer {
   answeredAt     DateTime @default(now()) @map("answered_at")
 
   @@id([attemptId, questionId])
+  @@index([questionId])
   @@map("answers")
 }
 

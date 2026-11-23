@@ -20,8 +20,9 @@ async function send<T>(url: string, init: RequestInit): Promise<ApiResult<T>> {
 }
 
 /** JSON request carrying the custom header the server requires for CSRF defence. */
-export function api<T = unknown>(method: "GET" | "POST" | "PATCH" | "DELETE" | "PUT", url: string, body?: unknown) {
+export function api<T = unknown>(method: "GET" | "POST" | "PATCH" | "DELETE" | "PUT", url: string, body?: unknown, opts?: { keepalive?: boolean }) {
   return send<T>(url, {
+    keepalive: opts?.keepalive,
     method,
     headers: body === undefined ? {} : { "content-type": "application/json" },
     body: body === undefined ? undefined : JSON.stringify(body),

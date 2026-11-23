@@ -3,7 +3,8 @@ import { z } from "zod";
 import { db } from "@/lib/db";
 import { HttpError, handleError, requireStudent } from "@/lib/auth";
 import { parseParam } from "@/lib/http";
-import { finalizeAttempt, resultsVisible } from "@/lib/attempts";
+import { resultsVisible } from "@/lib/attempts";
+import { scoreAttempt } from "@/lib/scoring";
 import { loadOwnedAttempt } from "@/lib/student-access";
 
 export const dynamic = "force-dynamic";
@@ -22,25 +23,24 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
       return NextResponse.json({ ...base, released: false });
     }
 
-    const r = await finalizeAttempt(attemptId, attempt.status === "EXPIRED" ? "EXPIRED" : "SUBMITTED"); // returns stored result
+    // The attempt is already finished, so its score is stored. Recompute only the breakdown, read-only:
+    // no row lock and no writes, so many students can view results at once.
+    const [questions, answers] = await Promise.all([
+      db.question.findMany({ where: { testId: attempt.testId }, orderBy: { order: "asc" }, select: { id: true, text: true, options: true, correctOption: true, explanation: true, marks: true } }),
+      db.answer.findMany({ where: { attemptId }, select: { questionId: true, selectedOption: true } }),
+    ]);
+    const picked = new Map(answers.map((a) => [a.questionId, a.selectedOption] as const));
+    const r = scoreAttempt(questions, picked);
+    const score = attempt.score ?? Math.round(r.score);
     const total = r.totalMarks;
-
-    let review: unknown = undefined;
-    if (attempt.test.showAnswers) {
-      const [questions, answers] = await Promise.all([
-        db.question.findMany({ where: { testId: attempt.testId }, orderBy: { order: "asc" }, select: { id: true, text: true, options: true, correctOption: true, explanation: true, marks: true } }),
-        db.answer.findMany({ where: { attemptId }, select: { questionId: true, selectedOption: true } }),
-      ]);
-      const picked = new Map(answers.map((a) => [a.questionId, a.selectedOption]));
-      review = questions.map((q) => ({ ...q, selectedOption: picked.get(q.id) ?? null }));
-    }
+    const review = attempt.test.showAnswers ? questions.map((q) => ({ ...q, selectedOption: picked.get(q.id) ?? null })) : undefined;
 
     return NextResponse.json({
       ...base,
       released: true,
-      score: r.score,
+      score,
       totalMarks: total,
-      percentage: total > 0 ? Math.round((r.score / total) * 1000) / 10 : 0,
+      percentage: total > 0 ? Math.round((score / total) * 1000) / 10 : 0,
       correct: r.correct,
       wrong: r.wrong,
       unanswered: r.unanswered,

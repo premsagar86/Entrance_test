@@ -21,7 +21,7 @@ const FAIL = () => NextResponse.json({ error: "Invalid credentials" }, { status:
 const WINDOW = 15 * 60_000;
 // Many students can share one public IP (a lab or campus network), so this is generous. The per-email
 // limit below is the real brute-force guard. Tune with LOGIN_IP_LIMIT.
-const IP_LIMIT = Math.max(30, Number(process.env.LOGIN_IP_LIMIT) || 600);
+const IP_LIMIT = Math.max(30, Number(process.env.LOGIN_IP_LIMIT) || 3000);
 
 export async function POST(req: Request) {
   try {
