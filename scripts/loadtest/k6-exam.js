@@ -2,10 +2,13 @@
 //
 // Every student takes the exam once. All students SUBMIT AT THE SAME SECOND (the deadline burst), which is
 // the heaviest moment for the database. Logins and starts are spread over RAMP_SEC (a login storm).
+// Answers are predictable (see expectedOption). Just before submitting, each student reads the saved answers
+// back and compares them with every save the server acknowledged.
 //
 //   1. Seed:  npm run loadtest:seed -- <testId> 1000      (staging database only, see seed script)
 //   2. Run:   k6 run -e BASE_URL=https://staging.example.com -e TEST_ID=<testId> -e VUS=1000 scripts/loadtest/k6-exam.js
-//   3. Clean: npm run loadtest:seed -- --clean
+//   3. Check: npm run loadtest:verify -- <testId> 1000   (saved answers, scores, statuses)
+//   4. Clean: delete the whole staging database (--clean cannot remove students who have attempts)
 //
 // Env: VUS (default 1000, must be <= seeded students), RAMP_SEC (login/start spread, default 60),
 //      HOLD_SEC (time spent answering before the burst, default 120), TURNSTILE_TOKEN,
@@ -29,6 +32,10 @@ const HOLD_SEC = Number(__ENV.HOLD_SEC || 120);
 if (!BASE || !TEST_ID) throw new Error("Set BASE_URL and TEST_ID (-e BASE_URL=... -e TEST_ID=...)");
 
 const completed = new Rate("exam_completed"); // every student must end with a submitted attempt
+const intact = new Rate("answers_intact"); // no acknowledged save may be missing or changed
+
+// Must match expectedOption() in scripts/loadtest/verify-results.ts.
+const expectedOption = (student, questionIndex, optionCount) => (student + questionIndex) % optionCount;
 
 export const options = {
   scenarios: {
@@ -42,6 +49,7 @@ export const options = {
     "http_req_duration{name:autosave}": ["p(95)<500"],
     "http_req_duration{name:submit}": ["p(95)<3000"],
     exam_completed: ["rate>0.99"],
+    answers_intact: ["rate==1"],
   },
 };
 
@@ -72,19 +80,28 @@ export default function (data) {
   if (!check(start, { "start 200": (r) => r.status === 200 })) return void completed.add(false);
   const { attemptId, questions } = start.json();
 
-  // Answer (autosave every 10 s) until the shared submit moment.
+  // Answer (autosave every 10 s) until shortly before the shared submit moment.
+  const saved = {}; // questionId -> option, only for saves the server acknowledged
   let q = 0;
-  while (Date.now() < data.submitAt - 10_000) {
-    const question = questions[q % questions.length];
+  while (Date.now() < data.submitAt - 20_000) {
+    const index = q % questions.length;
+    const question = questions[index];
+    const selectedOption = expectedOption(n, index, question.options.length);
     q++;
     const save = http.put(
       `${BASE}/api/student/attempts/${attemptId}/answers`,
-      JSON.stringify({ answers: [{ questionId: question.id, selectedOption: q % 4 }] }),
+      JSON.stringify({ answers: [{ questionId: question.id, selectedOption }] }),
       { headers, tags: { name: "autosave" } },
     );
-    check(save, { "autosave 200": (r) => r.status === 200 });
+    if (check(save, { "autosave 200": (r) => r.status === 200 })) saved[question.id] = selectedOption;
     sleep(10);
   }
+
+  // Read the answers back (start resumes the same attempt), spread out so it does not form its own burst.
+  sleep(Math.random() * Math.max(0, (data.submitAt - Date.now()) / 1000 - 5));
+  const resume = http.post(`${BASE}/api/student/tests/${TEST_ID}/start`, null, { headers, tags: { name: "resume" } });
+  const answers = resume.status === 200 ? resume.json("answers") : null;
+  intact.add(!!answers && Object.keys(saved).every((id) => answers[id] === saved[id]));
 
   // Deadline burst: wait for the exact shared moment, then everyone submits together.
   const wait = (data.submitAt - Date.now()) / 1000;

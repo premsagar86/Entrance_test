@@ -1,13 +1,19 @@
 import type { z } from "zod";
 import { HttpError, assertSameOrigin } from "./auth";
 
+/**
+ * Client address used as the key for per-IP rate limits. Only a header set by the hosting proxy may be
+ * trusted: a visitor can send any other one. Railway documents X-Real-IP, which is the default; set
+ * CLIENT_IP_HEADER when a different proxy supplies the address in another header. Without that header,
+ * fall back to the LAST X-Forwarded-For entry (the one added by the nearest proxy); earlier entries
+ * can be supplied by the visitor.
+ */
 export function clientIp(req: Request): string {
-  // Behind Cloudflare the real client address is CF-Connecting-IP (set by Cloudflare, not spoofable
-  // as long as traffic reaches the origin through Cloudflare).
-  const cf = req.headers.get("cf-connecting-ip")?.trim();
-  if (cf) return cf;
+  const header = process.env.CLIENT_IP_HEADER?.trim() || "x-real-ip";
+  const trusted = req.headers.get(header)?.trim();
+  if (trusted) return trusted;
   const xff = req.headers.get("x-forwarded-for");
-  return xff?.split(",")[0]?.trim() || "unknown";
+  return xff?.split(",").pop()?.trim() || "unknown";
 }
 
 /** Same-origin check + size-capped, strictly validated JSON body. */

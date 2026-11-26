@@ -14,7 +14,7 @@ npm run db:seed               # creates the admin from SEED_ADMIN_EMAIL / SEED_A
 npm run dev                   # http://localhost:3000
 ```
 
-With no mail provider configured, the admin OTP is printed to the server console. `DEV_SKIP_ADMIN_OTP=true` skips it (ignored in production).
+The admin signs in with email + phone number (the phone number acts as the password). No code is emailed.
 
 ## Scripts
 

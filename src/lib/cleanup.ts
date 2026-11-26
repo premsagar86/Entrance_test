@@ -11,11 +11,20 @@ const STALE_AFTER_MS = 10 * 60_000;
 export async function cleanupAttempts() {
   const cutoff = new Date(Date.now() - STALE_AFTER_MS);
   const stale = await db.attempt.findMany({ where: { status: "IN_PROGRESS", expiresAt: { lt: cutoff } }, select: { id: true } });
-  for (const a of stale) await finalizeAttempt(a.id, "EXPIRED");
+  // One attempt that cannot be finalized must not block the others or the rest of the cleanup.
+  let failed = 0;
+  for (const a of stale) {
+    try {
+      await finalizeAttempt(a.id, "EXPIRED");
+    } catch (e) {
+      failed++;
+      console.error("cleanup: could not finalize attempt", a.id, e);
+    }
+  }
   const now = new Date();
   const dayAgo = new Date(Date.now() - 24 * 3600_000);
   const s = await db.session.deleteMany({ where: { absoluteExpiresAt: { lt: now } } });
   const o = await db.otpCode.deleteMany({ where: { expiresAt: { lt: dayAgo } } });
   const r = await db.rateLimit.deleteMany({ where: { windowStart: { lt: dayAgo }, OR: [{ lockedUntil: null }, { lockedUntil: { lt: now } }] } });
-  return { expiredAttempts: stale.length, sessions: s.count, otps: o.count, rateLimits: r.count };
+  return { expiredAttempts: stale.length - failed, failed, sessions: s.count, otps: o.count, rateLimits: r.count };
 }

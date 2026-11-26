@@ -17,7 +17,9 @@ function authorized(req: Request): boolean {
 export async function GET(req: Request) {
   if (!authorized(req)) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   try {
-    return NextResponse.json({ ok: true, ...(await cleanupAttempts()) });
+    const result = await cleanupAttempts();
+    // A non-2xx status makes the scheduler show the run as failed when any attempt could not be finalized.
+    return NextResponse.json({ ok: result.failed === 0, ...result }, { status: result.failed === 0 ? 200 : 500 });
   } catch (e) {
     console.error("cron cleanup failed", e);
     return NextResponse.json({ error: "Cleanup failed" }, { status: 500 });
